@@ -170,49 +170,35 @@ class PioneerClient:
             version_number=reservation.version_number,
         )
 
-    def get_dataset(self, name: str) -> JsonObject:
-        return self._request("GET", f"/felix/datasets/{quote(name, safe='')}")
+    def get_dataset(self, name: str, version_number: str | None = None) -> JsonObject:
+        path = f"/felix/datasets/{quote(name, safe='')}"
+        if version_number is not None:
+            path += f"/{quote(version_number, safe='')}"
+        return self._request("GET", path)
 
     def wait_for_dataset(
-        self,
-        name: str,
-        *,
-        dataset_id: str | None = None,
-        version_number: str | None = None,
-        interval: int = 5,
-        timeout: int = 600,
+        self, dataset: UploadedDataset, *, interval: int = 5, timeout: int = 600
     ) -> JsonObject:
         deadline = time.monotonic() + timeout
         while True:
-            result = self.get_dataset(name)
-            versions = result.get("versions", [])
-            latest = versions[0] if versions else result
-            if not isinstance(latest, dict):
-                raise PioneerError(f"dataset {name!r} returned an invalid version")
-            
-            # Verify immutable identifiers to prevent TOCTOU attacks
-            if dataset_id is not None:
-                actual_id = latest.get("dataset_id") or latest.get("id")
-                if actual_id != dataset_id:
-                    raise PioneerError(
-                        f"dataset {name!r} ID mismatch: expected {dataset_id!r}, got {actual_id!r}"
-                    )
-            if version_number is not None:
-                actual_version = latest.get("version_number") or latest.get("version")
-                if actual_version != version_number:
-                    raise PioneerError(
-                        f"dataset {name!r} version mismatch: expected {version_number!r}, "
-                        f"got {actual_version!r}"
-                    )
-            
-            status = latest.get("status")
+            result = self.get_dataset(dataset.dataset_name, dataset.version_number)
+            if result.get("id") != dataset.dataset_id:
+                raise PioneerError(f"dataset {dataset.dataset_name!r} returned an unexpected ID")
+            if result.get("version_number") != dataset.version_number:
+                raise PioneerError(
+                    f"dataset {dataset.dataset_name!r} returned an unexpected version"
+                )
+            status = result.get("status")
             if status == "ready":
-                return latest
+                return result
             if status == "failed":
-                raise PioneerError(f"dataset {name!r} failed: {latest.get('processing_error')}")
+                raise PioneerError(
+                    f"dataset {dataset.dataset_name!r} failed: {result.get('processing_error')}"
+                )
             if time.monotonic() >= deadline:
                 raise PioneerError(
-                    f"timed out waiting for dataset {name!r}; last status: {status!r}"
+                    f"timed out waiting for dataset {dataset.dataset_name!r}; "
+                    f"last status: {status!r}"
                 )
             time.sleep(interval)
 
@@ -224,23 +210,14 @@ class PioneerClient:
         base_model: str,
         epochs: int,
         learning_rate: float,
-        dataset_id: str | None = None,
-        version_number: str | None = None,
     ) -> JsonObject:
-        dataset_ref: dict[str, str] = {"name": dataset_name}
-        # Include immutable identifiers to prevent TOCTOU attacks
-        if dataset_id is not None:
-            dataset_ref["dataset_id"] = dataset_id
-        if version_number is not None:
-            dataset_ref["version_number"] = version_number
-        
         return self._request(
             "POST",
             "/felix/training-jobs",
             payload={
                 "model_name": model_name,
                 "base_model": base_model,
-                "datasets": [dataset_ref],
+                "datasets": [{"name": dataset_name}],
                 "training_type": "lora",
                 "nr_epochs": epochs,
                 "learning_rate": learning_rate,
@@ -276,30 +253,13 @@ class PioneerClient:
                 )
             time.sleep(interval)
 
-    def start_evaluation(
-        self,
-        *,
-        model_id: str,
-        dataset_name: str,
-        dataset_id: str | None = None,
-        version_number: str | None = None,
-    ) -> EvaluationStart:
-        payload: dict[str, str] = {
-            "base_model": model_id,
-            "dataset_name": dataset_name,
-        }
-        # Include immutable identifiers to prevent TOCTOU attacks
-        if dataset_id is not None:
-            payload["dataset_id"] = dataset_id
-        if version_number is not None:
-            payload["version_number"] = version_number
-        
+    def start_evaluation(self, *, model_id: str, dataset_name: str) -> EvaluationStart:
         try:
             return EvaluationStart.model_validate(
                 self._request(
                     "POST",
                     "/felix/evaluations",
-                    payload=payload,
+                    payload={"base_model": model_id, "dataset_name": dataset_name},
                 )
             )
         except ValidationError as exc:

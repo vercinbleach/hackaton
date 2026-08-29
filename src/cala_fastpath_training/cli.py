@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import secrets
 import sys
 import tempfile
 from collections.abc import Iterable
@@ -365,11 +366,7 @@ def upload(
         uploaded = client.upload_dataset(input_path, dataset_name=name, purpose=purpose)
         result = uploaded.model_dump()
         if wait:
-            result["ready"] = client.wait_for_dataset(
-                uploaded.dataset_name,
-                dataset_id=uploaded.dataset_id,
-                version_number=uploaded.version_number,
-            )
+            result["ready"] = client.wait_for_dataset(uploaded)
     _json(result)
 
 
@@ -451,30 +448,23 @@ def pipeline(
     )
 
     with PioneerClient.from_environment() as client:
-        train_name = f"{prefix}-train"
-        evaluation_name = f"{prefix}-evaluation"
+        run_id = secrets.token_hex(12)
+        train_name = f"{prefix}-{run_id}-train"
+        evaluation_name = f"{prefix}-{run_id}-evaluation"
         train_dataset = client.upload_dataset(
             train_path,
             dataset_name=train_name,
             purpose="training",
             content=train_content,
         )
-        client.wait_for_dataset(
-            train_dataset.dataset_name,
-            dataset_id=train_dataset.dataset_id,
-            version_number=train_dataset.version_number,
-        )
+        client.wait_for_dataset(train_dataset)
         evaluation_dataset = client.upload_dataset(
             validation_path,
             dataset_name=evaluation_name,
             purpose="evaluation",
             content=validation_content,
         )
-        client.wait_for_dataset(
-            evaluation_dataset.dataset_name,
-            dataset_id=evaluation_dataset.dataset_id,
-            version_number=evaluation_dataset.version_number,
-        )
+        client.wait_for_dataset(evaluation_dataset)
 
         training = client.start_training(
             model_name=model_name,
@@ -482,8 +472,6 @@ def pipeline(
             base_model=base_model,
             epochs=epochs,
             learning_rate=learning_rate,
-            dataset_id=train_dataset.dataset_id,
-            version_number=train_dataset.version_number,
         )
         training = client.wait_for_training(_required_id(training, "training job"))
         trained_model_id = _required_id(training, "trained model")
@@ -493,8 +481,6 @@ def pipeline(
             started = client.start_evaluation(
                 model_id=model_id,
                 dataset_name=evaluation_name,
-                dataset_id=evaluation_dataset.dataset_id,
-                version_number=evaluation_dataset.version_number,
             )
             if not started.evaluations:
                 raise typer.BadParameter(f"Pioneer did not return an evaluation ID for {name}")
