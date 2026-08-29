@@ -4,7 +4,7 @@ import mimetypes
 import os
 import time
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from pydantic import ValidationError
@@ -32,6 +32,13 @@ class PioneerClient:
             timeout=timeout,
             transport=transport,
         )
+        # Dedicated credential-free client for presigned URL uploads
+        # to prevent API key leakage to third-party storage services
+        self._upload_client = httpx.Client(
+            timeout=timeout,
+            transport=transport,
+            follow_redirects=False,
+        )
 
     def __enter__(self) -> PioneerClient:
         return self
@@ -41,6 +48,7 @@ class PioneerClient:
 
     def close(self) -> None:
         self._client.close()
+        self._upload_client.close()
 
     @classmethod
     def from_environment(cls) -> PioneerClient:
@@ -104,9 +112,19 @@ class PioneerClient:
         except ValidationError as exc:
             raise PioneerError(f"invalid dataset upload reservation: {exc}") from exc
 
+        # Validate presigned URL to prevent credential leakage
+        parsed = urlparse(reservation.presigned_url)
+        if parsed.scheme != "https":
+            raise PioneerError(
+                f"presigned URL must use HTTPS, got {parsed.scheme!r}"
+            )
+        if not parsed.hostname:
+            raise PioneerError("presigned URL must have a valid hostname")
+
         content_type = mimetypes.guess_type(path.name)[0] or "application/x-ndjson"
         try:
-            response = self._client.put(
+            # Use dedicated credential-free client for presigned URL upload
+            response = self._upload_client.put(
                 reservation.presigned_url,
                 content=path.read_bytes(),
                 headers={"Content-Type": content_type},
