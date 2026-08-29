@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,12 +10,67 @@ import typer
 from typer.testing import CliRunner
 
 from cala_fastpath_training import cli
-from cala_fastpath_training.models import UploadedDataset
+from cala_fastpath_training.models import (
+    BenchmarkCase,
+    GenerationRecord,
+    UploadedDataset,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "training" / "config" / "catalog.json"
 EXAMPLES = ROOT / "training" / "data" / "examples.jsonl"
 RUNNER = CliRunner()
+
+
+def test_sanitize_for_terminal_escapes_c0_and_c1_controls() -> None:
+    value = "normal\n\r\t\x07\x1b\x7f\x80ñ"
+
+    assert cli._sanitize_for_terminal(value) == (r"normal\n\r\t\x07\x1b\x7f\x80" + "ñ")
+
+
+def test_generate_escapes_status_id_but_preserves_json(tmp_path: Path, monkeypatch) -> None:
+    project = _project_root(tmp_path, monkeypatch)
+    questions = project / "questions.jsonl"
+    questions.write_text("{}\n", encoding="utf-8")
+    output = project / "benchmark" / "runs" / "out.jsonl"
+    malicious_id = "test\x1b[31m\rmalicious\nnext\t\x07"
+    case = BenchmarkCase(id=malicious_id, query="safe query")
+
+    class FakeGenerator:
+        system = "fake"
+        model = "fake-model"
+
+        def generate(self, benchmark_case: BenchmarkCase) -> GenerationRecord:
+            return GenerationRecord(
+                case_id=benchmark_case.id,
+                query=benchmark_case.query,
+                system=self.system,
+                model=self.model,
+                latency_ms=0,
+            )
+
+    monkeypatch.setattr(cli, "build_generators", lambda *args, **kwargs: [FakeGenerator()])
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [case])
+
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "generate",
+            str(questions),
+            "--systems",
+            "fake",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert r"[test\x1b[31m\rmalicious\nnext\t\x07]" in result.stderr
+    assert "\x1b" not in result.stderr
+    assert "\r" not in result.stderr
+    assert "\t" not in result.stderr
+    assert "\x07" not in result.stderr
+    assert json.loads(output.read_text(encoding="utf-8"))["case_id"] == malicious_id
 
 
 def _project_root(tmp_path: Path, monkeypatch) -> Path:
