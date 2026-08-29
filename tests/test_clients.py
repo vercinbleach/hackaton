@@ -118,13 +118,15 @@ def test_pioneer_upload_rejects_http_urls(tmp_path: Path) -> None:
 
     dataset = tmp_path / "train.jsonl"
     dataset.write_bytes(b'{"text":"example"}\n')
-    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(PioneerError, match="presigned URL must use HTTPS"):
-            client.upload_dataset(
-                dataset,
-                dataset_name="fastpath-train",
-                purpose="training",
-            )
+    with (
+        PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(PioneerError, match="presigned URL must use HTTPS"),
+    ):
+        client.upload_dataset(
+            dataset,
+            dataset_name="fastpath-train",
+            purpose="training",
+        )
 
 
 def test_pioneer_upload_rejects_urls_without_hostname(tmp_path: Path) -> None:
@@ -146,10 +148,12 @@ def test_pioneer_upload_rejects_urls_without_hostname(tmp_path: Path) -> None:
 
     dataset = tmp_path / "train.jsonl"
     dataset.write_bytes(b'{"text":"example"}\n')
-    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(PioneerError, match="presigned URL must have a valid hostname"):
-            client.upload_dataset(
-                dataset,
-                dataset_name="fastpath-train",
-                purpose="training",
-            )
+    with (
+        PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(PioneerError, match="presigned URL must have a valid hostname"),
+    ):
+        client.upload_dataset(
+            dataset,
+            dataset_name="fastpath-train",
+            purpose="training",
+        )
