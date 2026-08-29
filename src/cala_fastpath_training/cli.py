@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,10 +18,9 @@ from .dataset import (
     read_jsonl,
     to_pioneer_row,
     validate_examples,
-    write_jsonl,
 )
 from .generators import build_generators
-from .models import BenchmarkCase, JsonObject
+from .models import BenchmarkCase, JsonObject, PioneerRow, TrainingExample
 from .pioneer import PioneerClient
 from .seed_data import bootstrap_examples
 
@@ -28,6 +30,59 @@ DEFAULT_QUESTIONS = ROOT / "benchmark" / "data" / "questions.jsonl"
 DEFAULT_SKILL = ROOT / "benchmark" / "skills" / "cala-query" / "SKILL.md"
 load_dotenv(ROOT / ".env")
 app = typer.Typer(no_args_is_help=True, help="Cala FastPath GLiNER2 training pipeline")
+
+
+def _resolve_output_path(path: Path, allowed_subdir: Path, option_name: str) -> Path:
+    project_root = Path(os.path.abspath(ROOT))
+    allowed_root = (project_root / allowed_subdir).resolve()
+    unresolved = path if path.is_absolute() else project_root / path
+    unresolved = Path(os.path.abspath(unresolved))
+    current = unresolved
+    while current != project_root and current.is_relative_to(project_root):
+        if current.exists() and (
+            current.is_symlink() or (hasattr(current, "is_junction") and current.is_junction())
+        ):
+            raise typer.BadParameter(f"{option_name} cannot use symbolic links or junctions")
+        current = current.parent
+    resolved = unresolved.resolve()
+    if not resolved.is_relative_to(allowed_root):
+        raise typer.BadParameter(f"{option_name} must stay within {allowed_root}")
+    return resolved
+
+
+def _write_output_text(path: Path, content: str, allowed_subdir: Path, option_name: str) -> Path:
+    resolved = _resolve_output_path(path, allowed_subdir, option_name)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved = _resolve_output_path(resolved, allowed_subdir, option_name)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", newline="\n", dir=resolved.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(content)
+    try:
+        resolved = _resolve_output_path(resolved, allowed_subdir, option_name)
+        os.replace(temporary, resolved)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return resolved
+
+
+def _write_output_jsonl(
+    path: Path,
+    rows: Iterable[TrainingExample | PioneerRow],
+    allowed_subdir: Path,
+    option_name: str,
+) -> Path:
+    content = "".join(
+        json.dumps(
+            row.model_dump(by_alias=True, exclude_none=True),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n"
+        for row in rows
+    )
+    return _write_output_text(path, content, allowed_subdir, option_name)
 
 
 def _json(value: Any) -> None:
@@ -75,6 +130,7 @@ def generate(
     """Generate comparable plans without grading them."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    output = _resolve_output_path(output, Path("benchmark/runs"), "--output")
     selected = [item.strip() for item in systems.split(",") if item.strip()]
     try:
         generators = build_generators(
@@ -95,8 +151,8 @@ def generate(
             typer.echo(f"[{case.id}] {generator.system} ({generator.model})", err=True)
             records.append(generator.generate(case))
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
+    output = _write_output_text(
+        output,
         "".join(
             json.dumps(
                 record.model_dump(by_alias=True, exclude_none=True),
@@ -106,7 +162,8 @@ def generate(
             + "\n"
             for record in records
         ),
-        encoding="utf-8",
+        Path("benchmark/runs"),
+        "--output",
     )
     _json(
         {
@@ -124,9 +181,10 @@ def bootstrap(
     catalog: Annotated[Path, typer.Option()] = DEFAULT_CATALOG,
 ) -> None:
     """Create the initial canonical examples."""
+    output = _resolve_output_path(output, Path("training/data"), "--output")
     rows = bootstrap_examples()
     validate_examples(rows, load_catalog(catalog))
-    write_jsonl(output, rows)
+    output = _write_output_jsonl(output, rows, Path("training/data"), "--output")
     _json(dataset_summary(rows))
 
 
@@ -151,6 +209,7 @@ def build_command(
     catalog: Annotated[Path, typer.Option()] = DEFAULT_CATALOG,
 ) -> None:
     """Create grouped splits and Pioneer files."""
+    output_dir = _resolve_output_path(output_dir, Path("training/artifacts"), "--output-dir")
     loaded_catalog = load_catalog(catalog)
     rows = read_jsonl(input_path)
     validate_examples(rows, loaded_catalog)
@@ -166,17 +225,25 @@ def build_command(
         "schema": loaded_catalog.inference_schema(),
         "splits": {},
     }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = _resolve_output_path(output_dir, Path("training/artifacts"), "--output-dir")
     for name in ("train", "validation", "test"):
         split_rows = getattr(splits, name)
-        write_jsonl(output_dir / "canonical" / f"{name}.jsonl", split_rows)
-        write_jsonl(
+        _write_output_jsonl(
+            output_dir / "canonical" / f"{name}.jsonl",
+            split_rows,
+            Path("training/artifacts"),
+            "--output-dir",
+        )
+        _write_output_jsonl(
             output_dir / "pioneer" / f"{name}.jsonl",
             (to_pioneer_row(row) for row in split_rows),
+            Path("training/artifacts"),
+            "--output-dir",
         )
         manifest["splits"][name] = dataset_summary(split_rows)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "schema.json").write_text(
+    _write_output_text(
+        output_dir / "schema.json",
         json.dumps(
             loaded_catalog.inference_schema(),
             ensure_ascii=False,
@@ -184,11 +251,14 @@ def build_command(
             sort_keys=True,
         )
         + "\n",
-        encoding="utf-8",
+        Path("training/artifacts"),
+        "--output-dir",
     )
-    (output_dir / "manifest.json").write_text(
+    _write_output_text(
+        output_dir / "manifest.json",
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        Path("training/artifacts"),
+        "--output-dir",
     )
     _json(manifest["splits"])
 
