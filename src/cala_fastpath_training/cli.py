@@ -137,6 +137,7 @@ def generate(
             selected,
             catalog=load_catalog(catalog),
             skill_path=skill,
+            skills_root=ROOT / "benchmark" / "skills",
             openai_model=openai_model,
             reasoning_effort=reasoning_effort,
             base_model=base_model,
