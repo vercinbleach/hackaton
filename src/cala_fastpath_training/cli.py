@@ -34,6 +34,45 @@ load_dotenv(ROOT / ".env")
 app = typer.Typer(no_args_is_help=True, help="Cala FastPath GLiNER2 training pipeline")
 
 
+def _sanitize_for_terminal(text: str) -> str:
+    """
+    Escape control characters to prevent terminal output injection.
+
+    Replaces all C0 (U+0000-U+001F) and C1 (U+007F-U+009F) control characters
+    with visible ASCII escape sequences. Uses \\n, \\r, \\t for those three
+    and \\xNN for all others (including ESC, BEL, etc.). Normal Unicode
+    characters are preserved unchanged.
+
+    This prevents terminal manipulation attacks while keeping the output
+    human-readable and unambiguous.
+
+    Args:
+        text: Input string that may contain control characters
+
+    Returns:
+        String with all control characters escaped as visible ASCII
+    """
+    result = []
+    for char in text:
+        code = ord(char)
+        # C0 controls (0x00-0x1F) and DEL (0x7F) and C1 controls (0x80-0x9F)
+        if code <= 0x1F or code == 0x7F or (0x80 <= code <= 0x9F):
+            # Use readable escapes for common whitespace
+            if char == "\n":
+                result.append("\\n")
+            elif char == "\r":
+                result.append("\\r")
+            elif char == "\t":
+                result.append("\\t")
+            else:
+                # Use \xNN for all other control characters
+                result.append(f"\\x{code:02x}")
+        else:
+            # Preserve normal Unicode characters
+            result.append(char)
+    return "".join(result)
+
+
 def _resolve_output_path(path: Path, allowed_subdir: Path, option_name: str) -> Path:
     project_root = Path(os.path.abspath(ROOT))
     allowed_root = (project_root / allowed_subdir).resolve()
@@ -230,7 +269,8 @@ def generate(
     records = []
     for case in _read_benchmark_cases(input_path):
         for generator in generators:
-            typer.echo(f"[{case.id}] {generator.system} ({generator.model})", err=True)
+            safe_id = _sanitize_for_terminal(case.id)
+            typer.echo(f"[{safe_id}] {generator.system} ({generator.model})", err=True)
             records.append(generator.generate(case))
 
     output = _write_output_text(
