@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -56,10 +56,36 @@ class TrainingExample(StrictModel):
         return self
 
 
+class NerEntity(StrictModel):
+    text: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_offsets(self) -> NerEntity:
+        if self.end != self.start + len(self.text):
+            raise ValueError("NER entity end must be the exclusive end of text")
+        return self
+
+
 class PioneerRow(StrictModel):
-    text: str
-    labels: list[str]
-    json_structures: list[dict[str, dict[str, str]]] | None = None
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    text: str = Field(min_length=1)
+    labels: list[str] = Field(min_length=1)
+    entities: list[NerEntity] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_labels(self) -> PioneerRow:
+        if len(set(self.labels)) != len(self.labels):
+            raise ValueError("Pioneer labels must be unique")
+        for entity in self.entities:
+            if entity.end > len(self.text):
+                raise ValueError("NER entity is outside the input text")
+            if self.text[entity.start : entity.end] != entity.text:
+                raise ValueError("NER entity offsets do not match its text")
+        return self
 
 
 class SplitResult(StrictModel):
@@ -119,6 +145,9 @@ class GenerationRecord(StrictModel):
     usage: dict[str, Any] | None = None
     raw: dict[str, Any] | None = None
     error: str | None = None
+    decision: Literal["accepted", "abstained"] | None = None
+    abstention_reason: str | None = None
+    threshold: float | None = Field(default=None, ge=0, le=1)
 
 
 JsonObject = dict[str, Any]

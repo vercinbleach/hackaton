@@ -13,7 +13,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from .catalog import Catalog
-from .models import PioneerRow, SplitResult, TrainingExample
+from .compiler import PlanCompilationError, validate_plan_for_fastpath
+from .models import NerEntity, PioneerRow, SplitResult, TrainingExample
 
 
 class DatasetValidationError(ValueError):
@@ -100,8 +101,35 @@ def validate_examples(rows: list[TrainingExample], catalog: Catalog) -> None:
         if plan.operation == "unsupported":
             if plan.reason not in allowed_reasons:
                 raise DatasetValidationError(f"{prefix}: unsupported plan needs a known reason")
+            if any(
+                (
+                    plan.root is not None,
+                    bool(plan.filters),
+                    bool(plan.return_fields),
+                    plan.entity is not None,
+                    plan.order_by is not None,
+                    plan.limit is not None,
+                )
+            ):
+                raise DatasetValidationError(f"{prefix}: unsupported plan has executable fields")
+        elif plan.operation == "retrieve_entity":
+            if plan.root not in allowed_roots:
+                raise DatasetValidationError(f"{prefix}: unknown root {plan.root!r}")
+            if plan.entity is None or not plan.return_fields:
+                raise DatasetValidationError(
+                    f"{prefix}: retrieve_entity needs an entity and result projection"
+                )
+            if plan.filters or plan.reason or plan.order_by or plan.limit:
+                raise DatasetValidationError(
+                    f"{prefix}: retrieve_entity has incompatible executable fields"
+                )
         elif plan.root not in allowed_roots:
             raise DatasetValidationError(f"{prefix}: unknown root {plan.root!r}")
+        elif plan.operation == "knowledge_query":
+            try:
+                validate_plan_for_fastpath(plan, catalog)
+            except PlanCompilationError as exc:
+                raise DatasetValidationError(f"{prefix}: {exc}") from exc
         for field in plan.return_fields:
             if field not in allowed_returns:
                 raise DatasetValidationError(f"{prefix}: unknown return field {field!r}")
@@ -112,28 +140,102 @@ def validate_examples(rows: list[TrainingExample], catalog: Catalog) -> None:
                 raise DatasetValidationError(f"{prefix}: unknown filter kind {filter_value.kind!r}")
 
 
-def to_pioneer_row(row: TrainingExample) -> PioneerRow:
+def to_pioneer_row(row: TrainingExample, catalog: Catalog) -> PioneerRow:
     plan = row.plan
-    labels = [f"operation:{plan.operation}"]
-    if plan.operation == "unsupported":
-        labels.append(f"reason:{plan.reason}")
-    else:
-        labels.append(f"root:{plan.root}")
-        labels.extend(f"return:{field}" for field in plan.return_fields)
-        if plan.order_by:
-            labels.append(f"order_by:{plan.order_by}")
+    selected_labels = {f"operation:{plan.operation}"}
+    if plan.root:
+        selected_labels.add(f"root:{plan.root}")
+    selected_labels.update(f"return:{field}" for field in plan.return_fields if field != "name")
+    selected_labels.update(f"filter:{item.kind}" for item in plan.filters)
+    if plan.order_by:
+        selected_labels.add(f"order_by:{plan.order_by}")
+    if plan.reason:
+        selected_labels.add(f"reason:{plan.reason}")
+    labels = [label for label in catalog.classification_labels if label in selected_labels]
+    if set(labels) != selected_labels:
+        unknown = sorted(selected_labels - set(labels))
+        raise DatasetValidationError(f"plan cannot be flattened into catalog labels: {unknown!r}")
 
-    structures = [{item.kind: {"value": item.mention}} for item in plan.filters]
+    entities: list[NerEntity] = []
+
+    def annotation(mention: str, label: str) -> NerEntity:
+        start = row.text.casefold().index(mention.casefold())
+        text = row.text[start : start + len(mention)]
+        return NerEntity(text=text, label=label, start=start, end=start + len(text))
+
+    entities.extend(
+        annotation(item.mention, catalog.filters[item.kind].structure) for item in plan.filters
+    )
     if plan.entity:
-        structures.append({"entity_name": {"value": plan.entity.mention}})
+        entities.append(annotation(plan.entity.mention, "target_entity"))
     if plan.limit is not None:
-        structures.append({"limit_value": {"value": plan.limit_mention or ""}})
+        if not plan.limit_mention:
+            raise DatasetValidationError("limit requires a verbatim limit_mention")
+        entities.append(annotation(plan.limit_mention, "result_limit"))
 
     return PioneerRow(
         text=row.text,
-        labels=sorted(set(labels)),
-        json_structures=structures or None,
+        labels=labels,
+        entities=entities,
     )
+
+
+def _pioneer_to_gliner_row(row: PioneerRow, catalog: Catalog) -> dict[str, Any]:
+    classifications = [
+        {
+            "task": task,
+            "labels": config["labels"],
+            "true_label": row.labels,
+            "multi_label": config["multi_label"],
+        }
+        for task, config in catalog.classification_tasks.items()
+    ]
+    entities: dict[str, list[str]] = {}
+    for entity in row.entities:
+        entities.setdefault(entity.label, []).append(entity.text)
+    return {
+        "input": row.text,
+        "output": {
+            "classifications": classifications,
+            "entities": entities,
+            "entity_descriptions": {
+                label: catalog.ner_entities[label] for label in entities
+            },
+        },
+    }
+
+
+def validate_pioneer_jsonl(path: Path, catalog: Catalog) -> dict[str, Any]:
+    """Validate Pioneer upload rows and their conversion to native GLiNER2 records."""
+    from gliner2.training.data import InputExample, TrainingDataset
+
+    rows: list[PioneerRow] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            rows.append(PioneerRow.model_validate_json(line))
+        except ValidationError as exc:
+            raise DatasetValidationError(f"{path}:{line_number}: {exc}") from exc
+    if not rows:
+        raise DatasetValidationError("Pioneer dataset is empty")
+
+    allowed_labels = set(catalog.classification_labels) - {"return:name"}
+    allowed_entities = set(catalog.ner_labels)
+    converted = []
+    for index, row in enumerate(rows, 1):
+        unknown_labels = set(row.labels) - allowed_labels
+        if unknown_labels:
+            raise DatasetValidationError(
+                f"row {index}: unknown Pioneer labels {sorted(unknown_labels)!r}"
+            )
+        for entity in row.entities:
+            if entity.label not in allowed_entities:
+                raise DatasetValidationError(
+                    f"row {index}: unknown entity label {entity.label!r}"
+                )
+        converted.append(InputExample.from_dict(_pioneer_to_gliner_row(row, catalog)))
+    return TrainingDataset(converted).validate()
 
 
 def grouped_split(

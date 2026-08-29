@@ -100,6 +100,41 @@ def test_pioneer_upload_excludes_api_key_from_storage_request(tmp_path: Path) ->
         )
 
 
+def test_pioneer_upload_uses_content_type_signed_in_url(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/upload/url"):
+            return httpx.Response(200, json={
+                "presigned_url": "https://storage.example/upload?content-type=application%2Foctet-stream",
+                "dataset_id": "dataset-1", "dataset_name": "fastpath-train", "version_number": "1",
+            })
+        if request.url.host == "storage.example":
+            assert request.headers["Content-Type"] == "application/octet-stream"
+            assert "X-API-Key" not in request.headers
+            return httpx.Response(200)
+        return httpx.Response(200, json={})
+
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_bytes(b'{}\n')
+    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
+        client.upload_dataset(dataset, dataset_name="fastpath-train", purpose="training")
+
+
+def test_pioneer_upload_rejects_reservation_name_mismatch(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "presigned_url": "https://storage.example/upload", "dataset_id": "dataset-1",
+            "dataset_name": "other", "version_number": "1",
+        })
+
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_bytes(b'{}\n')
+    with (
+        PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(PioneerError, match="unexpected name"),
+    ):
+        client.upload_dataset(dataset, dataset_name="fastpath-train", purpose="training")
+
+
 def test_pioneer_upload_rejects_http_urls(tmp_path: Path) -> None:
     """Regression test: HTTP presigned URLs must be rejected before upload."""
 
@@ -213,6 +248,99 @@ def test_wait_for_dataset_polls_the_uploaded_version() -> None:
 
     with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
         assert client.wait_for_dataset(uploaded, interval=0, timeout=1)["status"] == "ready"
+
+
+def test_pioneer_starts_classification_generation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/generate"
+        assert json.loads(request.content) == {
+            "task_type": "classification",
+            "dataset_name": "cala-plan-labels",
+            "labels": ["operation:knowledge_query", "operation:unsupported"],
+            "num_examples": 100,
+            "domain_description": "Bilingual Cala queries",
+        }
+        return httpx.Response(200, json={"job_id": "generation-1", "status": "queued"})
+
+    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
+        result = client.start_generation(
+            task_type="classification",
+            dataset_name="cala-plan-labels",
+            labels=["operation:knowledge_query", "operation:unsupported"],
+            num_examples=100,
+            domain_description="Bilingual Cala queries",
+        )
+
+    assert result["job_id"] == "generation-1"
+
+
+def test_pioneer_starts_ner_generation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content) == {
+            "task_type": "ner",
+            "dataset_name": "cala-plan-entities",
+            "labels": ["target_entity", "result_limit"],
+            "num_examples": 50,
+        }
+        return httpx.Response(200, json={"id": "generation-2", "status": "queued"})
+
+    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
+        result = client.start_generation(
+            task_type="ner",
+            dataset_name="cala-plan-entities",
+            labels=["target_entity", "result_limit"],
+            num_examples=50,
+        )
+
+    assert result["id"] == "generation-2"
+
+
+@pytest.mark.parametrize("terminal", ["ready", "complete"])
+def test_wait_for_generation_accepts_documented_success_states(terminal: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.raw_path == b"/generate/jobs/job%2F1"
+        return httpx.Response(200, json={"job_id": "job/1", "status": terminal})
+
+    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
+        assert client.wait_for_generation("job/1", interval=0, timeout=1)["status"] == terminal
+
+
+def test_wait_for_generation_surfaces_provider_error() -> None:
+    with (
+        PioneerClient(
+            api_key="test-key",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={"job_id": "bad", "status": "failed", "error": "no valid samples"},
+                )
+            ),
+        ) as client,
+        pytest.raises(PioneerError, match="no valid samples"),
+    ):
+        client.wait_for_generation("bad", interval=0, timeout=1)
+
+
+def test_pioneer_training_accepts_multiple_datasets() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/felix/training-jobs"
+        body = json.loads(request.content)
+        assert body["datasets"] == [
+            {"name": "cala-plan-labels"},
+            {"name": "cala-plan-entities"},
+        ]
+        return httpx.Response(200, json={"id": "training-1"})
+
+    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
+        result = client.start_training(
+            model_name="cala-fastpath",
+            dataset_names=["cala-plan-labels", "cala-plan-entities"],
+            base_model="fastino/gliner2-multi-v1",
+            epochs=5,
+            learning_rate=5e-5,
+        )
+
+    assert result["id"] == "training-1"
 
 
 @pytest.mark.parametrize(

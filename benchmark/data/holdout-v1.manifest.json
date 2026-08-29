@@ -1,0 +1,30 @@
+{
+  "case_count": 40,
+  "canonical_sha256": "a44a8cdf12c06f06024de20192a229de6446110c54706866d249b9c50ea6e1d2",
+  "contract_sha256": "7aee8d63254be66168d76b051bf506c84c50e917442f1c242797a8283a51f38c",
+  "created_on": "2026-08-29",
+  "dataset": "holdout-v1.jsonl",
+  "dataset_sha256": "7d182c4b1c0aacea9a4501991ba4140a2dbf8496ff1f15088bb9994696635f01",
+  "evidence_limits": {
+    "maximum_claim": "pilot_holdout_only",
+    "minimum_independent_zero_error_accepts_for_99_percent_at_one_sided_95_percent": 299,
+    "supports_99_percent_precision_claim": false
+  },
+  "policy": {
+    "allowed_runs": 1,
+    "freeze_before_run": [
+      "model_revision",
+      "training_data",
+      "schema",
+      "compiler_policy",
+      "thresholds"
+    ],
+    "prohibited_uses": [
+      "threshold_tuning",
+      "schema_design",
+      "checkpoint_selection",
+      "prompt_or_skill_editing"
+    ]
+  },
+  "status": "sealed"
+}

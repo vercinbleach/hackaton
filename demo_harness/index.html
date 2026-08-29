@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" data-fastpath-harness="true">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cala FastPath harness</title>
+    <link rel="stylesheet" href="/demo/harness.css" />
+    <link rel="stylesheet" href="/extension/styles.css" />
+    <script src="/demo/harness.js" defer></script>
+    <script src="/extension/content.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/demo/" aria-label="Cala home">
+        <span class="brand__mark">C</span>
+        <span>cala</span>
+        <small>Beta</small>
+      </a>
+
+      <nav aria-label="Main navigation">
+        <a href="/demo/">↗ <span>Get started</span></a>
+        <div class="nav-label">Playground</div>
+        <a class="is-active" href="/demo/">{ } <span>New query</span></a>
+        <a href="#">▥ <span>New search</span></a>
+        <a href="#">⠿ <span>Entities</span></a>
+        <div class="nav-label">Manage</div>
+        <a href="#">⌁ <span>API Keys</span></a>
+        <a href="#">▭ <span>Billing</span></a>
+      </nav>
+
+      <section class="recent" aria-label="Recent queries">
+        <div class="recent__heading"><span>Recent</span><span>⌄</span></div>
+        <div id="recent-list"></div>
+      </section>
+
+      <div class="sidebar__footer">
+        <a href="#">▱ <span>Docs</span></a>
+        <a href="#">? <span>Help</span></a>
+        <div class="profile">
+          <span class="profile__avatar">V</span>
+          <span><strong>vercinxd</strong><small>demo@cala.ai</small></span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <span class="topbar__toggle">▣</span>
+        <span>Playground</span>
+        <span class="topbar__chevron">›</span>
+        <strong>Knowledge Query</strong>
+      </header>
+
+      <div class="page-container">
+        <div class="space-y-6">
+          <div class="flex h-12 page-heading">
+            <div class="page-heading__identity">
+              <span class="page-heading__icon">{ }</span>
+              <div>
+                <h1>Knowledge Query</h1>
+                <p>Returns typed, tabular JSON rows with extracted entities.</p>
+              </div>
+            </div>
+            <a class="history-button" href="#">◷ <span>History</span></a>
+          </div>
+
+          <section class="query-area" aria-label="Knowledge Query">
+            <div class="endpoint-row"><code>/knowledge/query</code> endpoint</div>
+            <div class="query-shell">
+              <span class="query-shell__search" aria-hidden="true">⌕</span>
+              <input
+                id="query"
+                autocomplete="off"
+                placeholder="Mistral.CEO.name or OpenAI.founded.year"
+                aria-label="/knowledge/query endpoint"
+              />
+              <button type="button" aria-label="Search">→</button>
+            </div>
+
+            <div class="space-y-3 mt-6 native-examples">
+              <div class="native-examples__heading">Example queries</div>
+              <div class="native-examples__list">
+                <button type="button">OpenAI . founded . year</button>
+                <button type="button">companies . founder . previous_job = Google</button>
+                <button type="button">startups . location = Spain . funding &gt; 10M</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="result-mount" class="result-mount" aria-live="polite"></section>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

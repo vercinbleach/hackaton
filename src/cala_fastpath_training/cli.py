@@ -20,6 +20,7 @@ from .dataset import (
     read_jsonl,
     to_pioneer_row,
     validate_examples,
+    validate_pioneer_jsonl,
 )
 from .generators import build_generators
 from .models import BenchmarkCase, JsonObject, PioneerRow, TrainingExample
@@ -71,6 +72,16 @@ def _sanitize_for_terminal(text: str) -> str:
             # Preserve normal Unicode characters
             result.append(char)
     return "".join(result)
+
+
+def _terminal_safe(text: str) -> str:
+    """Render control characters as explicit Unicode escapes."""
+    return "".join(
+        f"\\u{ord(char):04x}"
+        if ord(char) <= 0x1F or 0x7F <= ord(char) <= 0x9F
+        else char
+        for char in text
+    )
 
 
 def _resolve_output_path(path: Path, allowed_subdir: Path, option_name: str) -> Path:
@@ -212,7 +223,7 @@ def _json(value: Any) -> None:
 
 
 def _required_id(value: JsonObject, label: str) -> str:
-    identifier = value.get("id")
+    identifier = value.get("id") or value.get("job_id")
     if not isinstance(identifier, str) or not identifier:
         raise typer.BadParameter(f"Pioneer did not return a {label} ID")
     return identifier
@@ -252,6 +263,8 @@ def generate(
         sys.stdout.reconfigure(encoding="utf-8")
     output = _resolve_output_path(output, Path("benchmark/runs"), "--output")
     selected = [item.strip() for item in systems.split(",") if item.strip()]
+    if "openai-skill" in selected:
+        _secure_read_artifact(skill, ROOT / "benchmark" / "skills", "--skill")
     try:
         generators = build_generators(
             selected,
@@ -357,13 +370,22 @@ def build_command(
             Path("training/artifacts"),
             "--output-dir",
         )
+        pioneer_path = output_dir / "pioneer" / f"{name}.jsonl"
         _write_output_jsonl(
-            output_dir / "pioneer" / f"{name}.jsonl",
-            (to_pioneer_row(row) for row in split_rows),
+            pioneer_path,
+            (to_pioneer_row(row, loaded_catalog) for row in split_rows),
             Path("training/artifacts"),
             "--output-dir",
         )
-        manifest["splits"][name] = dataset_summary(split_rows)
+        pioneer_validation = validate_pioneer_jsonl(pioneer_path, loaded_catalog)
+        if pioneer_validation["invalid"]:
+            raise typer.BadParameter(
+                f"GLiNER2 rejected {pioneer_validation['invalid']} {name} rows"
+            )
+        manifest["splits"][name] = {
+            **dataset_summary(split_rows),
+            "pioneer_validation": pioneer_validation,
+        }
     _write_output_text(
         output_dir / "schema.json",
         json.dumps(
@@ -397,13 +419,26 @@ def upload(
     input_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     name: Annotated[str, typer.Option()],
     purpose: Annotated[str, typer.Option(help="training or evaluation")],
+    dataset_type: Annotated[
+        str,
+        typer.Option(help="classification, ner, custom, or decoder"),
+    ] = "custom",
     wait: Annotated[bool, typer.Option()] = False,
 ) -> None:
     """Upload a JSONL dataset to Pioneer."""
     if purpose not in {"training", "evaluation"}:
         raise typer.BadParameter("purpose must be training or evaluation")
+    if dataset_type not in {"classification", "ner", "custom", "decoder"}:
+        raise typer.BadParameter(
+            "dataset-type must be classification, ner, custom, or decoder"
+        )
     with PioneerClient.from_environment() as client:
-        uploaded = client.upload_dataset(input_path, dataset_name=name, purpose=purpose)
+        uploaded = client.upload_dataset(
+            input_path,
+            dataset_name=name,
+            purpose=purpose,
+            dataset_type=dataset_type,
+        )
         result = uploaded.model_dump()
         if wait:
             result["ready"] = client.wait_for_dataset(uploaded)
@@ -412,7 +447,7 @@ def upload(
 
 @app.command()
 def train(
-    dataset: Annotated[str, typer.Option()],
+    dataset: Annotated[list[str], typer.Option(help="Repeat for multiple datasets")],
     model_name: Annotated[str, typer.Option()] = "cala-fastpath-v0",
     base_model: Annotated[str, typer.Option()] = "fastino/gliner2-multi-v1",
     epochs: Annotated[int, typer.Option(min=1)] = 5,
@@ -423,7 +458,7 @@ def train(
     with PioneerClient.from_environment() as client:
         result = client.start_training(
             model_name=model_name,
-            dataset_name=dataset,
+            dataset_names=dataset,
             base_model=base_model,
             epochs=epochs,
             learning_rate=learning_rate,
@@ -433,11 +468,100 @@ def train(
     _json(result)
 
 
+@app.command("generate-plan-data")
+def generate_plan_data(
+    prefix: Annotated[str, typer.Option()] = "cala-fastpath-v1",
+    examples: Annotated[int, typer.Option(min=1)] = 100,
+    catalog: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = DEFAULT_CATALOG,
+    wait: Annotated[bool, typer.Option()] = False,
+) -> None:
+    """Generate the NER dataset used by the FastPath model.
+
+    Pioneer currently accepts classification generation jobs but can finish them
+    with zero valid samples for this taxonomy. Classification gold is therefore
+    uploaded explicitly with ``upload --dataset-type classification``.
+    """
+    loaded_catalog = load_catalog(catalog)
+    requests = [
+        {
+            "task_type": "ner",
+            "dataset_name": f"{prefix}-ner",
+            "labels": loaded_catalog.ner_labels,
+            "domain_description": (
+                "Spanish and English natural-language requests for company and startup data. "
+                "Entity labels identify query-slot values such as locations, industries, "
+                "funding bounds, employee bounds, founding years, previous employers, target "
+                "entities, and result limits."
+            ),
+        },
+    ]
+    results: dict[str, JsonObject] = {}
+    with PioneerClient.from_environment() as client:
+        for request in requests:
+            task_type = str(request["task_type"])
+            started = client.start_generation(
+                task_type=task_type,
+                dataset_name=str(request["dataset_name"]),
+                labels=list(request["labels"]),
+                num_examples=examples,
+                domain_description=str(request["domain_description"]),
+            )
+            if wait:
+                started = client.wait_for_generation(_required_id(started, "generation job"))
+            results[task_type] = started
+    _json(results)
+
+
+@app.command("generation-status")
+def generation_status(job_id: Annotated[str, typer.Argument()]) -> None:
+    """Read a Pioneer synthetic-data generation job."""
+    with PioneerClient.from_environment() as client:
+        _json(client.get_generation(job_id))
+
+
+@app.command("dataset-preview")
+def dataset_preview(
+    name: Annotated[str, typer.Argument()],
+    version: Annotated[str, typer.Option()],
+) -> None:
+    """Show Pioneer's dataset preview and validation details."""
+    with PioneerClient.from_environment() as client:
+        _json(client.preview_dataset(name, version))
+
+
+@app.command("dataset-download")
+def dataset_download(
+    name: Annotated[str, typer.Argument()],
+    version: Annotated[str, typer.Option()],
+    output: Annotated[Path | None, typer.Option()] = None,
+) -> None:
+    """Download a Pioneer dataset version as JSONL."""
+    with PioneerClient.from_environment() as client:
+        result = client.download_dataset(name, version)
+    if output is not None:
+        output = _write_output_text(
+            output,
+            result if result.endswith("\n") else result + "\n",
+            Path("training/artifacts"),
+            "--output",
+        )
+        _json({"output": str(output)})
+        return
+    typer.echo(_sanitize_for_terminal(result))
+
+
 @app.command()
 def status(job_id: Annotated[str, typer.Argument()]) -> None:
     """Read a Pioneer training job."""
     with PioneerClient.from_environment() as client:
         _json(client.get_training(job_id))
+
+
+@app.command("training-logs")
+def training_logs(job_id: Annotated[str, typer.Argument()]) -> None:
+    """Show Pioneer training logs and validation diagnostics."""
+    with PioneerClient.from_environment() as client:
+        _json(client.get_training_logs(job_id))
 
 
 @app.command()

@@ -9,6 +9,7 @@ import pytest
 
 from cala_fastpath_training.catalog import load_catalog
 from cala_fastpath_training.generators import GLiNERBaseGenerator, load_skill
+from cala_fastpath_training.models import BenchmarkCase, GenerationRecord
 from cala_fastpath_training.openai_responses import OpenAIResponsesClient, plan_output_schema
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,22 +69,194 @@ def test_openai_responses_uses_strict_plan_schema() -> None:
     assert usage == {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
 
 
-def test_gliner_output_converts_to_shared_plan() -> None:
+class FakeExtractor:
+    def __init__(self, classifications: dict, entities: dict) -> None:
+        self.classifications = classifications
+        self.entities = entities
+        self.tasks: dict | None = None
+        self.entity_types: dict | None = None
+
+    def classify_text(self, _query: str, tasks: dict, **_kwargs: object) -> dict:
+        self.tasks = tasks
+        return self.classifications
+
+    def extract_entities(self, _query: str, entity_types: dict, **_kwargs: object) -> dict:
+        self.entity_types = entity_types
+        return self.entities
+
+
+def _classification_output(
+    *,
+    employer_intent_confidence: float = 0.9,
+    explicit_returns: list[dict] | None = None,
+) -> dict:
+    labels = [
+        {"label": "operation:knowledge_query", "confidence": 0.99},
+        {"label": "root:companies", "confidence": 0.98},
+        {"label": "filter:previous_job_eq", "confidence": employer_intent_confidence},
+        {"label": "order_by:funding:desc", "confidence": 0.1},
+        {"label": "reason:unsupported_property", "confidence": 0.1},
+    ]
+    labels.extend(explicit_returns or [])
+    return {
+        "plan_labels": labels,
+    }
+
+
+def _run_fake(
+    *,
+    employer: str | None,
+    employer_intent_confidence: float = 0.9,
+    explicit_returns: list[dict] | None = None,
+) -> tuple[GenerationRecord, FakeExtractor]:
+    entities = {"entities": {}}
+    if employer is not None:
+        entities = {
+            "entities": {
+                "founder_previous_employer_filter": [
+                    {"text": employer, "confidence": 0.99}
+                ]
+            }
+        }
+    extractor = FakeExtractor(
+        _classification_output(
+            employer_intent_confidence=employer_intent_confidence,
+            explicit_returns=explicit_returns,
+        ),
+        entities,
+    )
     generator = GLiNERBaseGenerator(model="unused", catalog=CATALOG)
-    plan = generator._to_plan(
-        {
-            "plan_tags": [
-                {"label": "root:companies", "confidence": 0.9},
-                {"label": "return:founder", "confidence": 0.8},
-            ]
-        },
-        {"previous_job_eq": [{"value": {"text": "Google", "confidence": 0.99}}]},
+    generator._extractor = extractor
+    record = generator.generate(
+        BenchmarkCase(
+            id="test",
+            query=f"Empresas fundadas por exempleados de {employer or 'Google'}",
+        )
+    )
+    return record, extractor
+
+
+def test_gliner_implicit_projection_adds_name() -> None:
+    record, extractor = _run_fake(employer="Google")
+
+    assert record.error is None
+    assert record.decision == "accepted"
+    assert record.plan is not None
+    assert record.plan.return_fields == ["name"]
+    assert record.plan.filters[0].value == "Google"
+    assert extractor.tasks is not None
+    assert set(extractor.tasks) == {"plan_labels"}
+    assert extractor.tasks["plan_labels"]["multi_label"] is True
+    assert "return:name" not in extractor.tasks["plan_labels"]["labels"]
+    assert all(task["cls_threshold"] == 0.5 for task in extractor.tasks.values())
+    assert extractor.entity_types is not None
+    assert extractor.entity_types["founder_previous_employer_filter"]
+    assert "target_entity" in extractor.entity_types
+
+
+def test_gliner_explicit_founder_projection_is_added() -> None:
+    record, _ = _run_fake(
+        employer="Google",
+        explicit_returns=[{"label": "return:founder", "confidence": 0.91}],
     )
 
-    assert plan.operation == "knowledge_query"
-    assert plan.root == "companies"
-    assert plan.return_fields == ["founder"]
-    assert plan.filters[0].value == "Google"
+    assert record.error is None
+    assert record.plan is not None
+    assert record.plan.return_fields == ["name", "founder"]
+
+
+def test_gliner_filter_intent_without_employer_is_rejected() -> None:
+    record, _ = _run_fake(employer=None)
+
+    assert record.plan is None
+    assert record.cala_query is None
+    assert record.decision == "abstained"
+    assert record.abstention_reason == (
+        "filter label/extraction mismatch: missing=['previous_job_eq'], extra=[]"
+    )
+
+
+def test_gliner_extracts_microsoft_as_the_same_span_role() -> None:
+    record, _ = _run_fake(employer="Microsoft")
+
+    assert record.error is None
+    assert record.plan is not None
+    assert record.plan.filters[0].kind == "previous_job_eq"
+    assert record.plan.filters[0].value == "Microsoft"
+
+
+def test_gliner_filter_structure_without_label_is_rejected() -> None:
+    record, _ = _run_fake(employer="Google", employer_intent_confidence=0.49)
+
+    assert record.plan is None
+    assert record.decision == "abstained"
+    assert record.abstention_reason == (
+        "filter label/extraction mismatch: missing=[], extra=['previous_job_eq']"
+    )
+
+
+def test_gliner_rejects_two_values_for_the_same_entity_type() -> None:
+    extractor = FakeExtractor(
+        _classification_output(),
+        {
+            "entities": {
+                "founder_previous_employer_filter": [
+                    {"text": "Google", "confidence": 0.99},
+                    {"text": "Microsoft", "confidence": 0.98},
+                ]
+            }
+        },
+    )
+    generator = GLiNERBaseGenerator(model="unused", catalog=CATALOG)
+    generator._extractor = extractor
+
+    record = generator.generate(
+        BenchmarkCase(id="duplicate", query="Empresas creadas por ex Google y Microsoft")
+    )
+
+    assert record.decision == "abstained"
+    assert record.abstention_reason == (
+        "filter intent 'previous_job_eq' requires one extracted employer"
+    )
+
+
+def test_gliner_accepts_flat_pioneer_entity_records() -> None:
+    extractor = FakeExtractor(
+        _classification_output(),
+        {
+            "entities": [
+                {
+                    "text": "Google",
+                    "label": "founder_previous_employer_filter",
+                    "confidence": 0.99,
+                    "start": 28,
+                    "end": 34,
+                }
+            ]
+        },
+    )
+    generator = GLiNERBaseGenerator(model="unused", catalog=CATALOG)
+    generator._extractor = extractor
+
+    record = generator.generate(
+        BenchmarkCase(id="flat", query="Empresas creadas por antiguos Google employees")
+    )
+
+    assert record.decision == "accepted"
+    assert record.plan is not None
+    assert record.plan.filters[0].mention == "Google"
+
+
+def test_gliner_ignores_top_label_below_threshold() -> None:
+    record, _ = _run_fake(
+        employer="Google",
+        explicit_returns=[{"label": "return:founder", "confidence": 0.49}],
+    )
+
+    assert record.decision == "accepted"
+    assert record.plan is not None
+    assert record.plan.return_fields == ["name"]
+    assert record.plan.order_by is None
 
 
 def test_project_skill_contains_projection_rule() -> None:

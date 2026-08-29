@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "102",
+  "name": "Cala FastPath Demo",
+  "version": "0.1.0",
+  "description": "Adds a natural-language FastPath mode to Cala Knowledge Query.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://console.cala.ai/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Cala FastPath"
+  }
+}

@@ -166,9 +166,28 @@ def test_atomic_write_does_not_modify_external_hardlink(tmp_path: Path, monkeypa
     assert outside.read_text(encoding="utf-8") == "keep me"
 
 
+def test_skill_path_must_stay_in_project_skill_directory(tmp_path: Path, monkeypatch) -> None:
+    _project_root(tmp_path, monkeypatch)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(cli, "build_generators", lambda *args, **kwargs: [])
+
+    result = RUNNER.invoke(cli.app, ["generate", "--skill", str(outside)])
+
+    assert result.exit_code == 2
+    assert "--skill must stay within" in result.output
+
+
+def test_terminal_safe_escapes_control_characters() -> None:
+    assert cli._terminal_safe("case\n\x1b[31m") == "case\\u000a\\u001b[31m"
+
+
 def test_allowed_output_paths_still_work(tmp_path: Path, monkeypatch) -> None:
     project = _project_root(tmp_path, monkeypatch)
     generate_output = project / "benchmark" / "runs" / "generated.jsonl"
+    skill = project / "benchmark" / "skills" / "cala-query" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("test skill", encoding="utf-8")
     bootstrap_output = project / "training" / "data" / "generated.jsonl"
     build_output = project / "training" / "artifacts" / "test-build"
 
@@ -181,7 +200,7 @@ def test_allowed_output_paths_still_work(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
     generate_result = RUNNER.invoke(
         cli.app,
-        ["generate", "--output", str(generate_output)],
+        ["generate", "--output", str(generate_output), "--skill", str(skill)],
     )
     bootstrap_result = RUNNER.invoke(
         cli.app,

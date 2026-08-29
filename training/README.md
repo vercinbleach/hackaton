@@ -35,6 +35,8 @@ training/artifacts/v0/
 ```
 
 El split se hace por `group`. Las paráfrasis de un mismo caso nunca aparecen en particiones distintas.
+El `test` generado aquí es un split técnico del dataset de desarrollo; no es el holdout final. La
+suite sellada vive fuera del training en `benchmark/data/holdout-v1.jsonl`.
 
 ## Entrenamiento en Pioneer
 
@@ -59,7 +61,7 @@ uv run cala-fastpath train `
   --dataset cala-fastpath-train-v0 `
   --model-name cala-fastpath-v0 `
   --base-model fastino/gliner2-multi-v1 `
-  --epochs 5 `
+  --epochs 3 `
   --learning-rate 5e-5
 ```
 

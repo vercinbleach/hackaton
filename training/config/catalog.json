@@ -39,53 +39,82 @@
     "location_eq": {
       "path": ["location"],
       "operator": "=",
+      "structure": "location_exact_filter",
+      "field": "location",
       "description": "Location value used as an exact filter, such as Spain or Southern Europe"
     },
     "industry_eq": {
       "path": ["industry"],
       "operator": "=",
+      "structure": "industry_exact_filter",
+      "field": "industry",
       "description": "Industry or sector value used as an exact filter"
     },
     "funding_gt": {
       "path": ["funding"],
       "operator": ">",
+      "structure": "funding_lower_exclusive",
+      "field": "amount",
       "description": "Lower exclusive funding bound stated by the user"
     },
     "funding_lt": {
       "path": ["funding"],
       "operator": "<",
+      "structure": "funding_upper_exclusive",
+      "field": "amount",
       "description": "Upper exclusive funding bound stated by the user"
     },
     "funding_gte": {
       "path": ["funding"],
       "operator": ">=",
+      "structure": "funding_lower_inclusive",
+      "field": "amount",
       "description": "Lower inclusive funding bound stated by the user"
     },
     "funding_lte": {
       "path": ["funding"],
       "operator": "<=",
+      "structure": "funding_upper_inclusive",
+      "field": "amount",
       "description": "Upper inclusive funding bound stated by the user"
     },
     "employee_count_gt": {
       "path": ["employee_count"],
       "operator": ">",
+      "structure": "employee_count_lower_exclusive",
+      "field": "number",
       "description": "Lower exclusive employee-count bound stated by the user"
     },
     "employee_count_lt": {
       "path": ["employee_count"],
       "operator": "<",
+      "structure": "employee_count_upper_exclusive",
+      "field": "number",
       "description": "Upper exclusive employee-count bound stated by the user"
     },
     "founded_year_gt": {
       "path": ["founded", "year"],
       "operator": ">",
+      "structure": "founded_year_lower_exclusive",
+      "field": "year",
       "description": "Lower exclusive founding-year bound stated by the user"
     },
     "previous_job_eq": {
-      "path": ["founded", "previous_job"],
+      "path": ["founder", "previous_job"],
       "operator": "=",
-      "description": "Previous employer of a founder, such as Google"
+      "structure": "founder_previous_employer_filter",
+      "field": "employer",
+      "description": "Previous employer of a founder named in the request"
+    }
+  },
+  "special_structures": {
+    "target_entity": {
+      "field": "name",
+      "description": "Exact name of the entity requested by the user"
+    },
+    "result_limit": {
+      "field": "number",
+      "description": "Maximum result count stated by the user"
     }
   }
 }
-

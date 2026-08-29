@@ -26,9 +26,14 @@ Cala interno recibe la consulta en lenguaje natural porque esa es la capacidad q
 
 Esta separación permite atribuir los fallos. Si el resultado final es incorrecto, podremos distinguir entre un plan mal generado, una compilación incorrecta o una interpretación inesperada de Cala.
 
-## Dataset congelado
+## Suites de evaluación
 
-El eval usará entre 100 y 200 consultas que no aparecerán en train. Una vez revisadas, se congelan y no se modifican para favorecer ningún modelo.
+Los ocho casos Google son una regresión de desarrollo: sus ejemplos, semántica y resultados ya se
+usaron para diseñar el schema y el umbral. No cuentan como examen final.
+
+`holdout-v1.jsonl` contiene 40 casos nuevos, está sellado por hash y solo se ejecutará una vez después
+de congelar modelo, training, schema, compilador y umbrales. Es un piloto de cobertura funcional, no
+evidencia suficiente para afirmar 99% de precisión.
 
 El conjunto debe cubrir:
 
@@ -46,18 +51,23 @@ Cada caso tendrá una consulta, un plan gold revisado manualmente y, cuando corr
 
 ```json
 {
-  "query": "Dame nombre y fundador de empresas creadas por exempleados de Google",
+  "query": "Startups de France con más de 20M, devuelve nombre y financiación",
   "gold_plan": {
     "operation": "knowledge_query",
-    "root": "companies",
+    "root": "startups",
     "filters": [
       {
-        "path": ["founded", "previous_job"],
-        "operator": "=",
-        "value": "Google"
+        "kind": "location_eq",
+        "mention": "France",
+        "value": "France"
+      },
+      {
+        "kind": "funding_gt",
+        "mention": "20M",
+        "value": "20M"
       }
     ],
-    "return": ["name", "founder"]
+    "return": ["name", "funding"]
   }
 }
 ```
@@ -66,7 +76,8 @@ La partición mínima será:
 
 - `train`: ejemplos usados para ajustar el LoRA.
 - `validation`: ejemplos usados durante el desarrollo y la selección del checkpoint.
-- `test`: benchmark congelado, sin exposición durante el entrenamiento.
+- `test` interno: control técnico del training; no es evidencia final.
+- `holdout-v1`: benchmark externo sellado, sin exposición durante el ajuste.
 
 ## Eval del parser
 
@@ -79,8 +90,10 @@ consulta -> modelo -> plan -> validador -> métricas
 Mediremos:
 
 - Exact match del plan completo.
-- Exact match de filtros.
-- F1 de los campos solicitados en `return`.
+- Exactitud por componente: operación, raíz, filtros completos, proyección, entidad, orden, límite y motivo.
+- Precisión entre planes aceptados y su límite inferior de confianza.
+- Cobertura y abstenciones.
+- Aceptaciones inseguras: filtros ausentes, campos extra o planes inválidos.
 - Precisión y recall de `unsupported`.
 - Porcentaje de planes válidos según el schema.
 - Latencia del modelo.
@@ -145,7 +158,7 @@ La demo debe permitir comprobar estas hipótesis, no darlas por ciertas antes de
 - GLiNER2 base es rápido, pero falla en casos que requieren más composición.
 - GLiNER2 LoRA conserva la velocidad del modelo base y mejora su precisión.
 
-El resultado principal será una tabla agregada sobre el test congelado. La comparación interactiva permitirá abrir cada caso y entender por qué acertó o falló cada sistema.
+El resultado principal será una tabla agregada sobre el holdout sellado. La comparación interactiva permitirá abrir cada caso y entender por qué acertó o falló cada sistema.
 
 ## Resultado del hackathon
 

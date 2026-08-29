@@ -23,11 +23,15 @@ class Generator(Protocol):
     def generate(self, case: BenchmarkCase) -> GenerationRecord: ...
 
 
-def _compiled(plan: Plan, catalog: Catalog) -> str | None:
+class PlanExtractionError(ValueError):
+    pass
+
+
+def _compile_decision(plan: Plan, catalog: Catalog) -> tuple[str | None, str, str | None]:
     try:
-        return compile_plan(plan, catalog)
-    except PlanCompilationError:
-        return None
+        return compile_plan(plan, catalog), "accepted", None
+    except PlanCompilationError as exc:
+        return None, "abstained", str(exc)
 
 
 class OpenAIGenerator:
@@ -57,6 +61,7 @@ class OpenAIGenerator:
                     instructions=self.instructions,
                     catalog=self.catalog,
                 )
+            cala_query, decision, abstention_reason = _compile_decision(plan, self.catalog)
             return GenerationRecord(
                 case_id=case.id,
                 query=case.query,
@@ -64,10 +69,12 @@ class OpenAIGenerator:
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
                 plan=plan,
-                cala_query=_compiled(plan, self.catalog),
+                cala_query=cala_query,
                 latency_ms=(time.perf_counter() - started) * 1000,
                 usage=usage,
                 raw=compact_openai_raw(raw),
+                decision=decision,
+                abstention_reason=abstention_reason,
             )
         except Exception as exc:
             return GenerationRecord(
@@ -102,57 +109,50 @@ class GLiNERBaseGenerator:
         try:
             extractor = self._load()
             tasks = {
-                "plan_tags": {
-                    "labels": self.catalog.classification_labels,
-                    "multi_label": True,
-                }
+                task: {**config, "cls_threshold": self.threshold}
+                for task, config in self.catalog.classification_tasks.items()
             }
-            structures = {
-                name: [
-                    {
-                        "name": "value",
-                        "dtype": "str",
-                        "description": spec.description,
-                    }
-                ]
-                for name, spec in self.catalog.filters.items()
-            }
-            structures["entity_name"] = [
-                {
-                    "name": "value",
-                    "dtype": "str",
-                    "description": "Exact name of the entity requested by the user",
-                }
-            ]
-            structures["limit_value"] = [
-                {
-                    "name": "value",
-                    "dtype": "str",
-                    "description": "Maximum result count stated by the user",
-                }
-            ]
             tags = extractor.classify_text(
                 case.query,
                 tasks,
                 threshold=self.threshold,
                 include_confidence=True,
             )
-            extracted = extractor.extract_json(
+            extracted = extractor.extract_entities(
                 case.query,
-                structures,
+                self.catalog.ner_entities,
                 threshold=self.threshold,
                 include_confidence=True,
+                include_spans=True,
             )
-            plan = self._to_plan(tags, extracted)
+            raw = {"classifications": tags, "entities": extracted}
+            try:
+                plan = self._to_plan(tags, extracted)
+            except PlanExtractionError as exc:
+                return GenerationRecord(
+                    case_id=case.id,
+                    query=case.query,
+                    system=self.system,
+                    model=self.model,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    raw=raw,
+                    decision="abstained",
+                    abstention_reason=str(exc),
+                    threshold=self.threshold,
+                )
+            cala_query, decision, abstention_reason = _compile_decision(plan, self.catalog)
             return GenerationRecord(
                 case_id=case.id,
                 query=case.query,
                 system=self.system,
                 model=self.model,
                 plan=plan,
-                cala_query=_compiled(plan, self.catalog),
+                cala_query=cala_query,
                 latency_ms=(time.perf_counter() - started) * 1000,
-                raw={"classifications": tags, "structures": extracted},
+                raw=raw,
+                decision=decision,
+                abstention_reason=abstention_reason,
+                threshold=self.threshold,
             )
         except Exception as exc:
             return GenerationRecord(
@@ -162,38 +162,93 @@ class GLiNERBaseGenerator:
                 model=self.model,
                 latency_ms=(time.perf_counter() - started) * 1000,
                 error=str(exc),
+                threshold=self.threshold,
             )
 
     def _to_plan(self, tags: dict[str, Any], extracted: dict[str, Any]) -> Plan:
-        labels = [
-            item.get("label", "") for item in tags.get("plan_tags", []) if isinstance(item, dict)
-        ]
+        labels = self._selected_labels(tags, "plan_labels")
 
         def selected(prefix: str) -> list[str]:
             return [label.removeprefix(prefix) for label in labels if label.startswith(prefix)]
 
-        filters: list[dict[str, Any]] = []
-        for kind in self.catalog.filters:
-            for record in extracted.get(kind, []):
-                value = self._structure_text(record)
-                if value:
-                    filters.append({"kind": kind, "mention": value, "value": value})
-
-        operation = next(iter(selected("operation:")), None)
+        operations = selected("operation:")
         roots = selected("root:")
-        returns = selected("return:")
+        explicit_returns = selected("return:")
+        filter_intents = selected("filter:")
+        orders = selected("order_by:")
         reasons = selected("reason:")
-        entity_text = self._first_structure_text(extracted.get("entity_name", []))
-        limit_text = self._first_structure_text(extracted.get("limit_value", []))
 
-        if operation is None:
-            if reasons:
-                operation = "unsupported"
-            elif entity_text and not filters:
-                operation = "retrieve_entity"
-            else:
-                operation = "knowledge_query"
+        if len(operations) != 1:
+            raise PlanExtractionError("operation must have exactly one confident prediction")
+        operation = operations[0]
+        if len(roots) > 1:
+            raise PlanExtractionError("root has conflicting confident predictions")
+        if len(reasons) > 1:
+            raise PlanExtractionError("unsupported reason has conflicting predictions")
+        if len(orders) > 1:
+            raise PlanExtractionError("order_by has conflicting confident predictions")
 
+        filter_values: dict[str, list[str]] = {
+            kind: self._entity_texts(extracted, spec.structure)
+            for kind, spec in self.catalog.filters.items()
+        }
+        predicted_filter_kinds = set(filter_intents)
+        extracted_filter_kinds = {kind for kind, values in filter_values.items() if values}
+        if predicted_filter_kinds != extracted_filter_kinds:
+            missing = sorted(predicted_filter_kinds - extracted_filter_kinds)
+            extra = sorted(extracted_filter_kinds - predicted_filter_kinds)
+            raise PlanExtractionError(
+                f"filter label/extraction mismatch: missing={missing}, extra={extra}"
+            )
+
+        filters: list[dict[str, Any]] = []
+        for kind in filter_intents:
+            if kind not in self.catalog.filters:
+                raise PlanExtractionError(f"unknown filter intent {kind!r}")
+            values = filter_values[kind]
+            if len(values) != 1:
+                field = self.catalog.filters[kind].field
+                raise PlanExtractionError(f"filter intent {kind!r} requires one extracted {field}")
+            filters.append({"kind": kind, "mention": values[0], "value": values[0]})
+
+        entity_values = self._entity_texts(extracted, "target_entity")
+        limit_values = self._entity_texts(extracted, "result_limit")
+        if len(entity_values) > 1:
+            raise PlanExtractionError("multiple entity names extracted")
+        if len(limit_values) > 1:
+            raise PlanExtractionError("multiple limits extracted")
+
+        entity_text = entity_values[0] if entity_values else None
+        limit_text = limit_values[0] if limit_values else None
+        if limit_text is not None and not limit_text.isdigit():
+            raise PlanExtractionError("limit is not an integer")
+
+        if operation == "unsupported":
+            if len(reasons) != 1:
+                raise PlanExtractionError("unsupported operation requires one confident reason")
+            if roots or explicit_returns or filters or entity_text or orders or limit_text:
+                raise PlanExtractionError("unsupported operation contains executable plan fields")
+        elif operation == "retrieve_entity":
+            if len(roots) != 1 or entity_text is None or not explicit_returns:
+                raise PlanExtractionError(
+                    "retrieve_entity requires one root, one entity, and a result projection"
+                )
+            if filters or reasons or orders or limit_text:
+                raise PlanExtractionError("retrieve_entity contains incompatible plan fields")
+        elif operation == "knowledge_query":
+            if len(roots) != 1:
+                raise PlanExtractionError("knowledge_query requires one confident root")
+            if entity_text or reasons:
+                raise PlanExtractionError("knowledge_query contains incompatible plan fields")
+            if not filters and not (orders and limit_text):
+                raise PlanExtractionError("unconstrained collection query is unsafe for FastPath")
+        else:
+            raise PlanExtractionError(f"unknown operation {operation!r}")
+
+        returns = ["name"] if operation == "knowledge_query" else []
+        returns.extend(
+            field for field in explicit_returns if field != "name" and field not in returns
+        )
         limit = int(limit_text) if limit_text and limit_text.isdigit() else None
         return Plan.model_validate(
             {
@@ -204,7 +259,7 @@ class GLiNERBaseGenerator:
                 "entity": {"mention": entity_text}
                 if operation == "retrieve_entity" and entity_text
                 else None,
-                "order_by": next(iter(selected("order_by:")), None),
+                "order_by": orders[0] if orders else None,
                 "limit": limit,
                 "limit_mention": limit_text if limit is not None else None,
                 "reason": reasons[0] if reasons else None,
@@ -212,24 +267,52 @@ class GLiNERBaseGenerator:
         )
 
     @staticmethod
-    def _structure_text(record: Any) -> str | None:
+    def _entity_text(record: Any, threshold: float) -> str | None:
+        if isinstance(record, str):
+            return record
         if not isinstance(record, dict):
             return None
-        value = record.get("value")
-        if isinstance(value, str):
+        value = record.get("text")
+        confidence = record.get("confidence", 1.0)
+        if (
+            isinstance(value, str)
+            and isinstance(confidence, int | float)
+            and confidence >= threshold
+        ):
             return value
-        if isinstance(value, dict) and isinstance(value.get("text"), str):
-            return value["text"]
         return None
 
-    @classmethod
-    def _first_structure_text(cls, records: Any) -> str | None:
+    def _entity_texts(self, extracted: Any, label: str) -> list[str]:
+        records: Any = extracted
+        if isinstance(records, dict) and "entities" in records:
+            records = records["entities"]
+        if isinstance(records, dict):
+            records = records.get(label, [])
+        elif isinstance(records, list):
+            records = [
+                record
+                for record in records
+                if isinstance(record, dict) and record.get("label") == label
+            ]
         if not isinstance(records, list):
-            return None
-        for record in records:
-            if value := cls._structure_text(record):
-                return value
-        return None
+            records = [records]
+        return [
+            value
+            for record in records
+            if (value := self._entity_text(record, self.threshold)) is not None
+        ]
+
+    def _selected_labels(self, tags: dict[str, Any], task: str) -> list[str]:
+        raw = tags.get(task, [])
+        records = raw if isinstance(raw, list) else [raw]
+        labels: list[str] = []
+        for item in records:
+            if not isinstance(item, dict) or not isinstance(item.get("label"), str):
+                continue
+            confidence = item.get("confidence")
+            if isinstance(confidence, int | float) and confidence >= self.threshold:
+                labels.append(item["label"])
+        return list(dict.fromkeys(labels))
 
 
 def load_skill(path: Path, allowed_root: Path) -> str:
