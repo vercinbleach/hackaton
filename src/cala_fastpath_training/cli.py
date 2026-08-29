@@ -115,9 +115,7 @@ def _secure_read_artifact(path: Path, allowed_root: Path, label: str) -> bytes:
         if current.exists() and (
             current.is_symlink() or (hasattr(current, "is_junction") and current.is_junction())
         ):
-            raise typer.BadParameter(
-                f"{label} cannot use symbolic links or junctions: {path}"
-            )
+            raise typer.BadParameter(f"{label} cannot use symbolic links or junctions: {path}")
         current = current.parent
 
     # Verify the file exists
@@ -131,9 +129,7 @@ def _secure_read_artifact(path: Path, allowed_root: Path, label: str) -> bytes:
     # Resolve and check containment
     resolved = unresolved.resolve()
     if not resolved.is_relative_to(allowed_root):
-        raise typer.BadParameter(
-            f"{label} must stay within {allowed_root}: {path}"
-        )
+        raise typer.BadParameter(f"{label} must stay within {allowed_root}: {path}")
 
     # Open with O_NOFOLLOW where available to prevent symlink following
     flags = os.O_RDONLY
@@ -155,9 +151,7 @@ def _secure_read_artifact(path: Path, allowed_root: Path, label: str) -> bytes:
 
         # Reject hardlinks (st_nlink != 1)
         if st.st_nlink != 1:
-            raise typer.BadParameter(
-                f"{label} cannot have multiple hard links: {path}"
-            )
+            raise typer.BadParameter(f"{label} cannot have multiple hard links: {path}")
 
         # Read to EOF from the same descriptor to avoid TOCTOU
         handle = os.fdopen(fd, "rb")
@@ -442,14 +436,12 @@ def pipeline(
     artifacts = artifacts_dir / "pioneer"
     train_path = artifacts / "train.jsonl"
     validation_path = artifacts / "validation.jsonl"
-    
+
     # Securely validate and read artifact files to prevent symlink attacks
     artifacts_root = _resolve_output_path(
         artifacts_dir, Path("training/artifacts"), "--artifacts-dir"
     )
-    train_content = _secure_read_artifact(
-        train_path, artifacts_root, "training dataset"
-    )
+    train_content = _secure_read_artifact(train_path, artifacts_root, "training dataset")
     validation_content = _secure_read_artifact(
         validation_path, artifacts_root, "validation dataset"
     )
