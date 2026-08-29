@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import sys
 import tempfile
 from collections.abc import Iterable
@@ -83,6 +84,91 @@ def _write_output_jsonl(
         for row in rows
     )
     return _write_output_text(path, content, allowed_subdir, option_name)
+
+
+def _secure_read_artifact(path: Path, allowed_root: Path, label: str) -> bytes:
+    """Securely read an artifact file with comprehensive validation.
+
+    This prevents file exfiltration by:
+    - Requiring the path to stay within allowed_root
+    - Rejecting symlinks and junctions in the path hierarchy
+    - Rejecting hardlinks (st_nlink != 1)
+    - Opening with O_NOFOLLOW where available
+    - Verifying the file descriptor with fstat
+    - Reading from the same descriptor to avoid TOCTOU
+
+    Args:
+        path: The artifact file path to read
+        allowed_root: The root directory that must contain the artifact
+        label: A label for error messages
+
+    Raises:
+        typer.BadParameter: If validation fails or the file is unsafe
+    """
+    # Normalize paths
+    allowed_root = Path(os.path.abspath(allowed_root)).resolve()
+    unresolved = path if path.is_absolute() else Path(os.path.abspath(path))
+
+    # Check for symlinks/junctions in the path hierarchy
+    current = unresolved
+    while current != current.parent:
+        if current.exists() and (
+            current.is_symlink() or (hasattr(current, "is_junction") and current.is_junction())
+        ):
+            raise typer.BadParameter(
+                f"{label} cannot use symbolic links or junctions: {path}"
+            )
+        current = current.parent
+
+    # Verify the file exists
+    if not unresolved.exists():
+        raise typer.BadParameter(f"{label} does not exist: {path}")
+
+    # Verify it's a file
+    if not unresolved.is_file():
+        raise typer.BadParameter(f"{label} must be a file: {path}")
+
+    # Resolve and check containment
+    resolved = unresolved.resolve()
+    if not resolved.is_relative_to(allowed_root):
+        raise typer.BadParameter(
+            f"{label} must stay within {allowed_root}: {path}"
+        )
+
+    # Open with O_NOFOLLOW where available to prevent symlink following
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise typer.BadParameter(f"cannot open {label}: {path}") from exc
+
+    try:
+        # Verify the file descriptor with fstat
+        st = os.fstat(fd)
+
+        # Reject if not a regular file
+        if not stat.S_ISREG(st.st_mode):
+            raise typer.BadParameter(f"{label} must be a regular file: {path}")
+
+        # Reject hardlinks (st_nlink != 1)
+        if st.st_nlink != 1:
+            raise typer.BadParameter(
+                f"{label} cannot have multiple hard links: {path}"
+            )
+
+        # Read to EOF from the same descriptor to avoid TOCTOU
+        handle = os.fdopen(fd, "rb")
+        fd = -1
+        with handle:
+            content = handle.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+    return content
 
 
 def _json(value: Any) -> None:
@@ -356,8 +442,17 @@ def pipeline(
     artifacts = artifacts_dir / "pioneer"
     train_path = artifacts / "train.jsonl"
     validation_path = artifacts / "validation.jsonl"
-    if not train_path.exists() or not validation_path.exists():
-        raise typer.BadParameter(f"missing built datasets under {artifacts}")
+    
+    # Securely validate and read artifact files to prevent symlink attacks
+    artifacts_root = _resolve_output_path(
+        artifacts_dir, Path("training/artifacts"), "--artifacts-dir"
+    )
+    train_content = _secure_read_artifact(
+        train_path, artifacts_root, "training dataset"
+    )
+    validation_content = _secure_read_artifact(
+        validation_path, artifacts_root, "validation dataset"
+    )
 
     with PioneerClient.from_environment() as client:
         train_name = f"{prefix}-train"
@@ -366,12 +461,14 @@ def pipeline(
             train_path,
             dataset_name=train_name,
             purpose="training",
+            content=train_content,
         )
         client.wait_for_dataset(train_dataset.dataset_name)
         evaluation_dataset = client.upload_dataset(
             validation_path,
             dataset_name=evaluation_name,
             purpose="evaluation",
+            content=validation_content,
         )
         client.wait_for_dataset(evaluation_dataset.dataset_name)
 
