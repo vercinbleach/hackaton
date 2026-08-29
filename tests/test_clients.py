@@ -157,3 +157,61 @@ def test_pioneer_upload_rejects_urls_without_hostname(tmp_path: Path) -> None:
             dataset_name="fastpath-train",
             purpose="training",
         )
+
+
+def test_pioneer_client_rejects_http_base_url() -> None:
+    """Security test: PioneerClient must reject HTTP base URLs to prevent credential leakage."""
+    with pytest.raises(ValueError, match="base_url must use HTTPS scheme"):
+        PioneerClient(api_key="test-key", base_url="http://api.pioneer.ai")
+
+
+def test_pioneer_client_rejects_empty_base_url() -> None:
+    """Security test: PioneerClient must reject empty base URLs."""
+    with pytest.raises(ValueError, match="base_url cannot be empty"):
+        PioneerClient(api_key="test-key", base_url="")
+
+
+def test_pioneer_client_rejects_base_url_without_hostname() -> None:
+    """Security test: PioneerClient must reject base URLs without valid hostname."""
+    with pytest.raises(ValueError, match="base_url must have a valid hostname"):
+        PioneerClient(api_key="test-key", base_url="https:///path")
+
+
+def test_pioneer_client_accepts_valid_https_base_url() -> None:
+    """Security test: PioneerClient must accept valid HTTPS base URLs."""
+    # Should not raise
+    client = PioneerClient(api_key="test-key", base_url="https://custom.pioneer.ai")
+    client.close()
+
+
+def test_pioneer_client_strips_trailing_slash_from_base_url() -> None:
+    """PioneerClient should normalize base URLs by removing trailing slashes."""
+    client = PioneerClient(api_key="test-key", base_url="https://api.pioneer.ai/")
+    assert client._client.base_url == "https://api.pioneer.ai"
+    client.close()
+
+
+def test_cala_client_rejects_http_base_url() -> None:
+    """Security test: CalaClient must reject HTTP base URLs to prevent credential leakage."""
+    with pytest.raises(ValueError, match="base_url must use HTTPS scheme"):
+        CalaClient(api_key="test-key", base_url="http://api.cala.ai/v1")
+
+
+def test_cala_client_rejects_empty_base_url() -> None:
+    """Security test: CalaClient must reject empty base URLs."""
+    with pytest.raises(ValueError, match="base_url cannot be empty"):
+        CalaClient(api_key="test-key", base_url="")
+
+
+def test_cala_client_rejects_base_url_without_hostname() -> None:
+    """Security test: CalaClient must reject base URLs without valid hostname."""
+    with pytest.raises(ValueError, match="base_url must have a valid hostname"):
+        CalaClient(api_key="test-key", base_url="https:///v1")
+
+
+def test_cala_client_accepts_valid_https_base_url() -> None:
+    """Security test: CalaClient must accept valid HTTPS base URLs."""
+    # Should not raise
+    client = CalaClient(api_key="test-key", base_url="https://custom.cala.ai/v1")
+    client.close()
+
