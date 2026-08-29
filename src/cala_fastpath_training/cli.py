@@ -365,7 +365,11 @@ def upload(
         uploaded = client.upload_dataset(input_path, dataset_name=name, purpose=purpose)
         result = uploaded.model_dump()
         if wait:
-            result["ready"] = client.wait_for_dataset(uploaded.dataset_name)
+            result["ready"] = client.wait_for_dataset(
+                uploaded.dataset_name,
+                dataset_id=uploaded.dataset_id,
+                version_number=uploaded.version_number,
+            )
     _json(result)
 
 
@@ -455,14 +459,22 @@ def pipeline(
             purpose="training",
             content=train_content,
         )
-        client.wait_for_dataset(train_dataset.dataset_name)
+        client.wait_for_dataset(
+            train_dataset.dataset_name,
+            dataset_id=train_dataset.dataset_id,
+            version_number=train_dataset.version_number,
+        )
         evaluation_dataset = client.upload_dataset(
             validation_path,
             dataset_name=evaluation_name,
             purpose="evaluation",
             content=validation_content,
         )
-        client.wait_for_dataset(evaluation_dataset.dataset_name)
+        client.wait_for_dataset(
+            evaluation_dataset.dataset_name,
+            dataset_id=evaluation_dataset.dataset_id,
+            version_number=evaluation_dataset.version_number,
+        )
 
         training = client.start_training(
             model_name=model_name,
@@ -470,6 +482,8 @@ def pipeline(
             base_model=base_model,
             epochs=epochs,
             learning_rate=learning_rate,
+            dataset_id=train_dataset.dataset_id,
+            version_number=train_dataset.version_number,
         )
         training = client.wait_for_training(_required_id(training, "training job"))
         trained_model_id = _required_id(training, "trained model")
@@ -479,6 +493,8 @@ def pipeline(
             started = client.start_evaluation(
                 model_id=model_id,
                 dataset_name=evaluation_name,
+                dataset_id=evaluation_dataset.dataset_id,
+                version_number=evaluation_dataset.version_number,
             )
             if not started.evaluations:
                 raise typer.BadParameter(f"Pioneer did not return an evaluation ID for {name}")
