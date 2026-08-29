@@ -99,7 +99,7 @@ def test_load_skill_rejects_absolute_path_outside_allowed_root(tmp_path: Path) -
     outside.write_text("sensitive data", encoding="utf-8")
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
-    
+
     with pytest.raises(ValueError, match="must stay within"):
         load_skill(outside, skills_root)
 
@@ -111,7 +111,7 @@ def test_load_skill_rejects_relative_path_traversal(tmp_path: Path) -> None:
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
     traversal = skills_root / ".." / "outside.md"
-    
+
     with pytest.raises(ValueError, match="must stay within"):
         load_skill(traversal, skills_root)
 
@@ -123,12 +123,12 @@ def test_load_skill_rejects_symlink_to_outside_file(tmp_path: Path) -> None:
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
     link = skills_root / "link.md"
-    
+
     try:
         link.symlink_to(outside)
     except OSError as exc:
         pytest.skip(f"symbolic links are unavailable: {exc}")
-    
+
     with pytest.raises(ValueError, match="symbolic links or junctions"):
         load_skill(link, skills_root)
 
@@ -139,16 +139,16 @@ def test_load_skill_rejects_symlink_in_parent_directory(tmp_path: Path) -> None:
     outside.mkdir()
     skill_file = outside / "skill.md"
     skill_file.write_text("sensitive data", encoding="utf-8")
-    
+
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
     linked_dir = skills_root / "linked"
-    
+
     try:
         linked_dir.symlink_to(outside, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"symbolic links are unavailable: {exc}")
-    
+
     with pytest.raises(ValueError, match="symbolic links or junctions"):
         load_skill(linked_dir / "skill.md", skills_root)
 
@@ -160,12 +160,12 @@ def test_load_skill_rejects_hardlink_to_outside_file(tmp_path: Path) -> None:
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
     hardlink = skills_root / "hardlink.md"
-    
+
     try:
         os.link(outside, hardlink)
     except OSError as exc:
         pytest.skip(f"hardlinks are unavailable: {exc}")
-    
+
     with pytest.raises(ValueError, match="multiple hard links"):
         load_skill(hardlink, skills_root)
 
@@ -176,7 +176,7 @@ def test_load_skill_rejects_directory(tmp_path: Path) -> None:
     skills_root.mkdir()
     directory = skills_root / "subdir"
     directory.mkdir()
-    
+
     with pytest.raises(ValueError, match="must be a file"):
         load_skill(directory, skills_root)
 
@@ -186,7 +186,7 @@ def test_load_skill_rejects_nonexistent_file(tmp_path: Path) -> None:
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
     nonexistent = skills_root / "nonexistent.md"
-    
+
     with pytest.raises(ValueError, match="does not exist"):
         load_skill(nonexistent, skills_root)
 
@@ -197,7 +197,7 @@ def test_load_skill_accepts_valid_file_within_allowed_root(tmp_path: Path) -> No
     skills_root.mkdir()
     skill_file = skills_root / "valid.md"
     skill_file.write_text("valid skill content", encoding="utf-8")
-    
+
     content = load_skill(skill_file, skills_root)
     assert content == "valid skill content"
 
@@ -208,7 +208,7 @@ def test_load_skill_strips_frontmatter(tmp_path: Path) -> None:
     skills_root.mkdir()
     skill_file = skills_root / "with_frontmatter.md"
     skill_file.write_text("---\ntitle: Test\n---\nactual content", encoding="utf-8")
-    
+
     content = load_skill(skill_file, skills_root)
     assert content == "actual content"
 
@@ -220,6 +220,6 @@ def test_load_skill_accepts_nested_subdirectories(tmp_path: Path) -> None:
     nested.mkdir(parents=True)
     skill_file = nested / "nested.md"
     skill_file.write_text("nested skill", encoding="utf-8")
-    
+
     content = load_skill(skill_file, skills_root)
     assert content == "nested skill"
