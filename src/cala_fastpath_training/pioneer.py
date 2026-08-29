@@ -26,10 +26,8 @@ class PioneerClient:
     ):
         if not api_key:
             raise ValueError("PIONEER_API_KEY is required")
-        
-        # Validate base_url to prevent credential leakage to untrusted endpoints
         validated_url = self._validate_base_url(base_url)
-        
+
         self._client = httpx.Client(
             base_url=validated_url,
             headers={"X-API-Key": api_key, "Accept": "application/json"},
@@ -43,40 +41,21 @@ class PioneerClient:
             transport=transport,
             follow_redirects=False,
         )
-    
+
     @staticmethod
     def _validate_base_url(base_url: str) -> str:
-        """
-        Validate the base URL to prevent credential leakage.
-        
-        Ensures the URL uses HTTPS and has a valid hostname to prevent
-        API keys from being sent to untrusted or plaintext endpoints.
-        
-        Args:
-            base_url: The base URL to validate
-            
-        Returns:
-            The validated and normalized base URL (with trailing slash removed)
-            
-        Raises:
-            ValueError: If the URL scheme is not HTTPS or hostname is invalid
-        """
+        """Validate a credential-bearing Pioneer API endpoint."""
         if not base_url:
             raise ValueError("base_url cannot be empty")
-        
         parsed = urlparse(base_url)
-        
-        # Enforce HTTPS to prevent credential exposure over plaintext
         if parsed.scheme != "https":
-            raise ValueError(
-                f"base_url must use HTTPS scheme to protect API credentials, got {parsed.scheme!r}"
-            )
-        
-        # Ensure a valid hostname exists
+            raise ValueError("base_url must use HTTPS")
         if not parsed.hostname:
             raise ValueError("base_url must have a valid hostname")
-        
-        # Return normalized URL without trailing slash
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("base_url must not contain user information")
+        if parsed.query or parsed.fragment:
+            raise ValueError("base_url must not contain a query or fragment")
         return base_url.rstrip("/")
 
     def __enter__(self) -> PioneerClient:
@@ -154,9 +133,7 @@ class PioneerClient:
         # Validate presigned URL to prevent credential leakage
         parsed = urlparse(reservation.presigned_url)
         if parsed.scheme != "https":
-            raise PioneerError(
-                f"presigned URL must use HTTPS, got {parsed.scheme!r}"
-            )
+            raise PioneerError(f"presigned URL must use HTTPS, got {parsed.scheme!r}")
         if not parsed.hostname:
             raise PioneerError("presigned URL must have a valid hostname")
 
