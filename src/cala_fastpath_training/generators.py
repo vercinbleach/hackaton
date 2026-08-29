@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import time
 from pathlib import Path
 from typing import Any, Protocol
@@ -231,8 +232,82 @@ class GLiNERBaseGenerator:
         return None
 
 
-def load_skill(path: Path) -> str:
-    content = path.read_text(encoding="utf-8")
+def load_skill(path: Path, allowed_root: Path) -> str:
+    """Securely load a skill file with comprehensive validation.
+
+    This prevents file exfiltration by:
+    - Requiring the path to stay within allowed_root
+    - Rejecting symlinks and junctions in the path hierarchy
+    - Rejecting hardlinks (st_nlink != 1)
+    - Opening with O_NOFOLLOW where available
+    - Verifying the file descriptor with fstat
+    - Reading from the same descriptor to avoid TOCTOU
+
+    Args:
+        path: The skill file path to load
+        allowed_root: The root directory that must contain the skill file
+
+    Raises:
+        ValueError: If validation fails or the file is unsafe
+    """
+    # Normalize paths
+    allowed_root = Path(os.path.abspath(allowed_root)).resolve()
+    unresolved = path if path.is_absolute() else Path(os.path.abspath(path))
+
+    # Check for symlinks/junctions in the path hierarchy
+    current = unresolved
+    while current != current.parent:
+        if current.exists() and (
+            current.is_symlink() or (hasattr(current, "is_junction") and current.is_junction())
+        ):
+            raise ValueError(f"skill path cannot use symbolic links or junctions: {path}")
+        current = current.parent
+
+    # Verify the file exists
+    if not unresolved.exists():
+        raise ValueError(f"skill file does not exist: {path}")
+
+    # Verify it's a file
+    if not unresolved.is_file():
+        raise ValueError(f"skill path must be a file: {path}")
+
+    # Resolve and check containment
+    resolved = unresolved.resolve()
+    if not resolved.is_relative_to(allowed_root):
+        raise ValueError(f"skill path must stay within {allowed_root}: {path}")
+
+    # Open with O_NOFOLLOW where available to prevent symlink following
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"cannot open skill file: {path}") from exc
+
+    try:
+        # Verify the file descriptor with fstat
+        st = os.fstat(fd)
+
+        # Reject if not a regular file
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError(f"skill path must be a regular file: {path}")
+
+        # Reject hardlinks (st_nlink != 1)
+        if st.st_nlink != 1:
+            raise ValueError(f"skill file cannot have multiple hard links: {path}")
+
+        # Read to EOF from the same descriptor to avoid TOCTOU and short reads.
+        handle = os.fdopen(fd, encoding="utf-8")
+        fd = -1
+        with handle:
+            content = handle.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+    # Strip frontmatter if present
     if content.startswith("---\n"):
         _, _, remainder = content.partition("\n---\n")
         return remainder.strip()
@@ -244,6 +319,7 @@ def build_generators(
     *,
     catalog: Catalog,
     skill_path: Path,
+    skills_root: Path,
     openai_model: str | None = None,
     reasoning_effort: str | None = None,
     base_model: str | None = None,
@@ -277,7 +353,7 @@ def build_generators(
                     system=system,
                     model=openai_model,
                     reasoning_effort=reasoning_effort,
-                    instructions=f"{BASE_INSTRUCTIONS}\n\n{load_skill(skill_path)}",
+                    instructions=f"{BASE_INSTRUCTIONS}\n\n{load_skill(skill_path, skills_root)}",
                     catalog=catalog,
                 )
             )

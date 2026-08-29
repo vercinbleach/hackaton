@@ -114,6 +114,11 @@ def test_allowed_output_paths_still_work(tmp_path: Path, monkeypatch) -> None:
     bootstrap_output = project / "training" / "data" / "generated.jsonl"
     build_output = project / "training" / "artifacts" / "test-build"
 
+    # Create a valid skill file for the generate command
+    skill_file = project / "benchmark" / "skills" / "cala-query" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True, exist_ok=True)
+    skill_file.write_text("test skill content", encoding="utf-8")
+
     monkeypatch.setattr(cli, "build_generators", lambda *args, **kwargs: [])
     monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
     generate_result = RUNNER.invoke(
@@ -143,3 +148,128 @@ def test_allowed_output_paths_still_work(tmp_path: Path, monkeypatch) -> None:
     assert bootstrap_output.exists()
     assert (build_output / "schema.json").exists()
     assert (build_output / "manifest.json").exists()
+
+
+def test_generate_rejects_skill_outside_allowed_directory(tmp_path: Path, monkeypatch) -> None:
+    """Reject skill paths that point outside benchmark/skills."""
+    _project_root(tmp_path, monkeypatch)
+    outside = tmp_path / "outside.md"
+    outside.write_text("sensitive data", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
+    result = RUNNER.invoke(
+        cli.app,
+        ["generate", "--skill", str(outside), "--systems", "openai-skill"],
+    )
+
+    assert result.exit_code == 2
+    assert "must stay within" in result.output
+
+
+def test_generate_rejects_skill_with_path_traversal(tmp_path: Path, monkeypatch) -> None:
+    """Reject skill paths using ../ to escape the allowed directory."""
+    project = _project_root(tmp_path, monkeypatch)
+    outside = tmp_path / "outside.md"
+    outside.write_text("sensitive data", encoding="utf-8")
+
+    # Create skills directory
+    skills_dir = project / "benchmark" / "skills"
+    skills_dir.mkdir(parents=True)
+
+    # Try to use path traversal
+    traversal = skills_dir / ".." / ".." / ".." / "outside.md"
+
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
+    result = RUNNER.invoke(
+        cli.app,
+        ["generate", "--skill", str(traversal), "--systems", "openai-skill"],
+    )
+
+    assert result.exit_code == 2
+    assert "must stay within" in result.output
+
+
+def test_generate_rejects_skill_symlink(tmp_path: Path, monkeypatch) -> None:
+    """Reject skill files that are symlinks to outside files."""
+    project = _project_root(tmp_path, monkeypatch)
+    outside = tmp_path / "outside.md"
+    outside.write_text("sensitive data", encoding="utf-8")
+
+    skills_dir = project / "benchmark" / "skills"
+    skills_dir.mkdir(parents=True)
+    link = skills_dir / "link.md"
+
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
+    result = RUNNER.invoke(
+        cli.app,
+        ["generate", "--skill", str(link), "--systems", "openai-skill"],
+    )
+
+    assert result.exit_code == 2
+    assert "symbolic links or junctions" in result.output
+
+
+def test_generate_rejects_skill_hardlink(tmp_path: Path, monkeypatch) -> None:
+    """Reject skill files that are hardlinks to outside files."""
+    project = _project_root(tmp_path, monkeypatch)
+    outside = tmp_path / "outside.md"
+    outside.write_text("sensitive data", encoding="utf-8")
+
+    skills_dir = project / "benchmark" / "skills"
+    skills_dir.mkdir(parents=True)
+    hardlink = skills_dir / "hardlink.md"
+
+    try:
+        os.link(outside, hardlink)
+    except OSError as exc:
+        pytest.skip(f"hardlinks are unavailable: {exc}")
+
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
+    result = RUNNER.invoke(
+        cli.app,
+        ["generate", "--skill", str(hardlink), "--systems", "openai-skill"],
+    )
+
+    assert result.exit_code == 2
+    assert "multiple hard links" in result.output
+
+
+def test_generate_rejects_skill_directory(tmp_path: Path, monkeypatch) -> None:
+    """Reject skill paths that point to directories."""
+    project = _project_root(tmp_path, monkeypatch)
+    skills_dir = project / "benchmark" / "skills"
+    skills_dir.mkdir(parents=True)
+    directory = skills_dir / "subdir"
+    directory.mkdir()
+
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
+    result = RUNNER.invoke(
+        cli.app,
+        ["generate", "--skill", str(directory), "--systems", "openai-skill"],
+    )
+
+    assert result.exit_code == 2
+    assert "must be a file" in result.output
+
+
+def test_generate_accepts_valid_skill_file(tmp_path: Path, monkeypatch) -> None:
+    """Accept a valid skill file within benchmark/skills."""
+    project = _project_root(tmp_path, monkeypatch)
+    skills_dir = project / "benchmark" / "skills"
+    skills_dir.mkdir(parents=True)
+    skill_file = skills_dir / "valid.md"
+    skill_file.write_text("valid skill content", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "build_generators", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "_read_benchmark_cases", lambda path: [])
+    result = RUNNER.invoke(
+        cli.app,
+        ["generate", "--skill", str(skill_file), "--systems", "openai-skill"],
+    )
+
+    assert result.exit_code == 0
