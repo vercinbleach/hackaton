@@ -1,0 +1,91 @@
+{
+  "operations": [
+    "knowledge_query",
+    "retrieve_entity",
+    "unsupported"
+  ],
+  "roots": [
+    "companies",
+    "startups",
+    "people",
+    "products",
+    "laws"
+  ],
+  "returns": [
+    "name",
+    "founder",
+    "funding",
+    "sector",
+    "employee_count",
+    "registered_address",
+    "legal_name",
+    "founded_year",
+    "location"
+  ],
+  "order_by": [
+    "funding:asc",
+    "funding:desc",
+    "employee_count:asc",
+    "employee_count:desc",
+    "founded_year:asc",
+    "founded_year:desc"
+  ],
+  "unsupported_reasons": [
+    "open_ended_explanation",
+    "multi_step_reasoning",
+    "unsupported_property"
+  ],
+  "filters": {
+    "location_eq": {
+      "path": ["location"],
+      "operator": "=",
+      "description": "Location value used as an exact filter, such as Spain or Southern Europe"
+    },
+    "industry_eq": {
+      "path": ["industry"],
+      "operator": "=",
+      "description": "Industry or sector value used as an exact filter"
+    },
+    "funding_gt": {
+      "path": ["funding"],
+      "operator": ">",
+      "description": "Lower exclusive funding bound stated by the user"
+    },
+    "funding_lt": {
+      "path": ["funding"],
+      "operator": "<",
+      "description": "Upper exclusive funding bound stated by the user"
+    },
+    "funding_gte": {
+      "path": ["funding"],
+      "operator": ">=",
+      "description": "Lower inclusive funding bound stated by the user"
+    },
+    "funding_lte": {
+      "path": ["funding"],
+      "operator": "<=",
+      "description": "Upper inclusive funding bound stated by the user"
+    },
+    "employee_count_gt": {
+      "path": ["employee_count"],
+      "operator": ">",
+      "description": "Lower exclusive employee-count bound stated by the user"
+    },
+    "employee_count_lt": {
+      "path": ["employee_count"],
+      "operator": "<",
+      "description": "Upper exclusive employee-count bound stated by the user"
+    },
+    "founded_year_gt": {
+      "path": ["founded", "year"],
+      "operator": ">",
+      "description": "Lower exclusive founding-year bound stated by the user"
+    },
+    "previous_job_eq": {
+      "path": ["founded", "previous_job"],
+      "operator": "=",
+      "description": "Previous employer of a founder, such as Google"
+    }
+  }
+}
+

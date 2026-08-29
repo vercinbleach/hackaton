@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cala-fastpath-training"
+version = "0.1.0"
+description = "Training pipeline for the Cala FastPath GLiNER2 model"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "gliner2[local]>=2.0,<3",
+    "httpx>=0.28,<1",
+    "pydantic>=2.13,<3",
+    "python-dotenv>=1.1,<2",
+    "typer>=0.17,<1",
+]
+
+[project.scripts]
+cala-fastpath = "cala_fastpath_training.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+    "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cala_fastpath_training"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "SIM", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -1,0 +1,12 @@
+{"id":"projection-implicit-001","query":"compañías que han sido fundadas por ex Google employees"}
+{"id":"projection-explicit-002","query":"dame el nombre y los fundadores de empresas creadas por antiguos empleados de Google"}
+{"id":"projection-year-003","query":"¿en qué año se fundaron las compañías creadas por exempleados de Google?"}
+{"id":"projection-all-004","query":"quiero toda la información disponible de empresas fundadas por antiguos trabajadores de Google"}
+{"id":"funding-range-005","query":"startups españolas que hayan levantado más de 10M pero menos de 50M, solo nombre y financiación"}
+{"id":"location-implicit-006","query":"qué startups hay en Spain"}
+{"id":"order-limit-007","query":"las 5 startups españolas con más financiación, dime nombre, financiación y sector"}
+{"id":"employee-filter-008","query":"empresas de AI con más de 100 empleados, nombre y tamaño de plantilla"}
+{"id":"entity-openai-009","query":"cuántos empleados tiene OpenAI y cuál es su domicilio registrado"}
+{"id":"entity-apple-010","query":"necesito el nombre legal, la dirección registrada y el número de empleados de Apple"}
+{"id":"unsupported-explain-011","query":"explícame por qué OpenAI ha cambiado tanto la industria"}
+{"id":"unsupported-compare-012","query":"compara las estrategias de OpenAI y Anthropic y decide cuál es mejor"}
