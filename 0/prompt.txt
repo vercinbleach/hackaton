@@ -1,0 +1,41 @@
+como "vendo" / presento este proyecto?
+
+---
+
+en ingles
+
+---
+
+podemos ser mas tecnicos mencionar NER y tal quiero mencionar que esto es una demo de unos ejemplos controlados y que el SLM es bastante mas inferior que usar por ejemplo gpt luna que es de los modelso mas baratos actualmente pero explicar que con un equipo mas grande y mas tipo se puede logar muy buen quiero destacar que me costo bastante integrarme y desarrollar porque es la primera vez que hago RL y uso esta plataforma
+
+---
+
+Natural language
+&#x20;     ↓
+NER + classification with GLiNER2
+&#x20;     ↓
+Typed query plan
+&#x20;     ↓
+Validation and confidence policy
+&#x20;     ↓
+Deterministic Cala QL compiler
+&#x20;     ↓
+Cala execution haz un mermaid
+
+---
+
+vale quiero ir en una linea de lo siguiente hola soy vincenzo&#x20;
+
+explicar el proyecto en general como es la pipeline como quedaria este feature dentro de cala como ayudaria a cala esto y explicar los problemas que tuve con pioneer
+
+---
+
+con algunos endpoints pero hice un esfuerzo para entrenarlo en local consegui unas mejoras pero mi ordenador no podia hacer mas
+
+---
+
+vale eso al final di hola soy vincenzo esto hace mi producto la demo quiero que sepan que es controlado con 3 ejemplos es un SML que entrene con pineer conectado a cala con una extension de chrome&#x20;
+
+se me ocurrio esta solucion ya que hay casuisticas donde cala haces una query y te da mas informacion de la queralmente necesitas el objetivo es entender mejor el intent del usuario clasificandolo con el SML de pioneer entrenado y con un copilador que lo apoya crear la query de Cala. mas especifica tambien entre mas larga es la tabla que te piden quizas en mas puntos puede fallar y esto apunta tambien a ejemplos complejos&#x20;
+
+texto para leer en menos de 1:30

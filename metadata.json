@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M176KQYMVZT12HDWACQV1HB9",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "README.md",
+    "benchmark/data/google-founder-projection-gold.jsonl",
+    "benchmark/skills/cala-query/SKILL.md",
+    "demo.md",
+    "src/cala_fastpath_training/catalog.py",
+    "src/cala_fastpath_training/cli.py",
+    "src/cala_fastpath_training/compiler.py",
+    "src/cala_fastpath_training/dataset.py",
+    "src/cala_fastpath_training/generators.py",
+    "src/cala_fastpath_training/models.py",
+    "src/cala_fastpath_training/pioneer.py",
+    "tests/test_cli.py",
+    "tests/test_clients.py",
+    "tests/test_dataset.py",
+    "tests/test_generators.py",
+    "training/README.md",
+    "training/config/catalog.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 111894,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1553408,
+    "output_tokens": 13290,
+    "api_call_count": 25
+  }
+}

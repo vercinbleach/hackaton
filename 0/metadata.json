@@ -1,0 +1,233 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M176KQYMVZT12HDWACQV1HB9",
+  "session_id": "01a04e33-6f77-7d73-9873-2b41904a94ca",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-29T16:45:59.91833Z",
+  "branch": "main",
+  "checkpoints_count": 6,
+  "save_step_count": 6,
+  "files_touched": [
+    "README.md",
+    "benchmark/data/google-founder-projection-gold.jsonl",
+    "benchmark/skills/cala-query/SKILL.md",
+    "demo.md",
+    "src/cala_fastpath_training/catalog.py",
+    "src/cala_fastpath_training/cli.py",
+    "src/cala_fastpath_training/compiler.py",
+    "src/cala_fastpath_training/dataset.py",
+    "src/cala_fastpath_training/generators.py",
+    "src/cala_fastpath_training/models.py",
+    "src/cala_fastpath_training/pioneer.py",
+    "tests/test_cli.py",
+    "tests/test_clients.py",
+    "tests/test_dataset.py",
+    "tests/test_generators.py",
+    "training/README.md",
+    "training/config/catalog.json"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.6-sol",
+  "turn_id": "a4a73af992cc",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 111894,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1553408,
+    "output_tokens": 13290,
+    "api_call_count": 25
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-29T16:45:59.8447717Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 4849,
+    "human_removed": 1820,
+    "total_committed": 0,
+    "total_lines_changed": 6669,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 6731,
+      "user_lines_removed": 3012,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".codex/hooks.json": 88,
+        "README.md": 35,
+        "benchmark/data/README.md": 18,
+        "benchmark/data/google-founder-projection-dev.jsonl": 8,
+        "benchmark/data/holdout-v1.jsonl": 40,
+        "benchmark/data/holdout-v1.manifest.json": 30,
+        "benchmark/skills/cala-query/SKILL.md": 17,
+        "demo.md": 175,
+        "demo_harness/harness.css": 434,
+        "demo_harness/harness.js": 181,
+        "demo_harness/index.html": 95,
+        "extension/README.md": 25,
+        "extension/background.js": 71,
+        "extension/content.js": 576,
+        "extension/manifest.json": 23,
+        "extension/styles.css": 373,
+        "src/cala_fastpath_training/catalog.py": 109,
+        "src/cala_fastpath_training/cli.py": 545,
+        "src/cala_fastpath_training/compiler.py": 91,
+        "src/cala_fastpath_training/dataset.py": 287,
+        "src/cala_fastpath_training/demo_server.py": 378,
+        "src/cala_fastpath_training/evaluation.py": 280,
+        "src/cala_fastpath_training/generators.py": 438,
+        "src/cala_fastpath_training/models.py": 134,
+        "src/cala_fastpath_training/pioneer.py": 286,
+        "tests/test_cli.py": 462,
+        "tests/test_clients.py": 252,
+        "tests/test_compiler.py": 128,
+        "tests/test_dataset.py": 175,
+        "tests/test_demo_server.py": 128,
+        "tests/test_evaluation.py": 248,
+        "tests/test_extension_package.py": 36,
+        "tests/test_generators.py": 343,
+        "training/README.md": 102,
+        "training/config/catalog.json": 120
+      },
+      "user_removed_per_file": {
+        "README.md": 25,
+        "benchmark/data/google-founder-projection-gold.jsonl": 8,
+        "benchmark/skills/cala-query/SKILL.md": 22,
+        "demo.md": 162,
+        "src/cala_fastpath_training/catalog.py": 86,
+        "src/cala_fastpath_training/cli.py": 537,
+        "src/cala_fastpath_training/compiler.py": 32,
+        "src/cala_fastpath_training/dataset.py": 191,
+        "src/cala_fastpath_training/generators.py": 364,
+        "src/cala_fastpath_training/models.py": 123,
+        "src/cala_fastpath_training/pioneer.py": 286,
+        "tests/test_cli.py": 443,
+        "tests/test_clients.py": 219,
+        "tests/test_dataset.py": 98,
+        "tests/test_generators.py": 225,
+        "training/README.md": 100,
+        "training/config/catalog.json": 91
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 674,
+      "user_lines_removed": 143,
+      "agent_lines_added": 6691,
+      "agent_lines_removed": 2999,
+      "user_added_per_file": {
+        ".codex/hooks.json": 88,
+        "extension/README.md": 3,
+        "extension/content.js": 82,
+        "src/cala_fastpath_training/cli.py": 122,
+        "src/cala_fastpath_training/demo_server.py": 8,
+        "src/cala_fastpath_training/generators.py": 48,
+        "src/cala_fastpath_training/pioneer.py": 130,
+        "tests/test_clients.py": 95,
+        "tests/test_demo_server.py": 20,
+        "tests/test_generators.py": 78
+      },
+      "user_removed_per_file": {
+        "extension/README.md": 2,
+        "extension/content.js": 25,
+        "src/cala_fastpath_training/cli.py": 21,
+        "src/cala_fastpath_training/demo_server.py": 3,
+        "src/cala_fastpath_training/generators.py": 39,
+        "src/cala_fastpath_training/pioneer.py": 28,
+        "tests/test_clients.py": 2,
+        "tests/test_generators.py": 23
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 214,
+      "user_lines_removed": 34,
+      "agent_lines_added": 6938,
+      "agent_lines_removed": 2886,
+      "user_added_per_file": {
+        ".codex/hooks.json": 88,
+        "extension/README.md": 3,
+        "extension/content.js": 82,
+        "src/cala_fastpath_training/demo_server.py": 8,
+        "src/cala_fastpath_training/pioneer.py": 13,
+        "tests/test_demo_server.py": 20
+      },
+      "user_removed_per_file": {
+        "extension/README.md": 2,
+        "extension/content.js": 25,
+        "src/cala_fastpath_training/demo_server.py": 3,
+        "src/cala_fastpath_training/pioneer.py": 4
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 201,
+      "user_lines_removed": 30,
+      "agent_lines_added": 6947,
+      "agent_lines_removed": 2886,
+      "user_added_per_file": {
+        ".codex/hooks.json": 88,
+        "extension/README.md": 3,
+        "extension/content.js": 82,
+        "src/cala_fastpath_training/demo_server.py": 8,
+        "tests/test_demo_server.py": 20
+      },
+      "user_removed_per_file": {
+        "extension/README.md": 2,
+        "extension/content.js": 25,
+        "src/cala_fastpath_training/demo_server.py": 3
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 201,
+      "user_lines_removed": 30,
+      "agent_lines_added": 6947,
+      "agent_lines_removed": 2886,
+      "user_added_per_file": {
+        ".codex/hooks.json": 88,
+        "extension/README.md": 3,
+        "extension/content.js": 82,
+        "src/cala_fastpath_training/demo_server.py": 8,
+        "tests/test_demo_server.py": 20
+      },
+      "user_removed_per_file": {
+        "extension/README.md": 2,
+        "extension/content.js": 25,
+        "src/cala_fastpath_training/demo_server.py": 3
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 649,
+      "user_lines_removed": 87,
+      "agent_lines_added": 6947,
+      "agent_lines_removed": 2886,
+      "user_added_per_file": {
+        ".codex/hooks.json": 88,
+        "README.md": 405,
+        "extension/README.md": 3,
+        "extension/content.js": 82,
+        "src/cala_fastpath_training/cli.py": 8,
+        "src/cala_fastpath_training/demo_server.py": 8,
+        "src/cala_fastpath_training/pioneer.py": 35,
+        "tests/test_demo_server.py": 20
+      },
+      "user_removed_per_file": {
+        "README.md": 35,
+        "extension/README.md": 2,
+        "extension/content.js": 25,
+        "src/cala_fastpath_training/cli.py": 7,
+        "src/cala_fastpath_training/demo_server.py": 3,
+        "src/cala_fastpath_training/pioneer.py": 15
+      }
+    }
+  ]
+}
