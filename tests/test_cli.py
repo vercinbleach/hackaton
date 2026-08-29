@@ -273,3 +273,59 @@ def test_generate_accepts_valid_skill_file(tmp_path: Path, monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
+
+
+def test_secure_read_artifact_rejects_symlink(tmp_path: Path) -> None:
+    """Reject artifact files that are symlinks."""
+    artifacts_root = tmp_path / "artifacts"
+    artifacts_root.mkdir()
+    outside = tmp_path / "outside.jsonl"
+    outside.write_bytes(b'{"sensitive": "data"}')
+
+    link = artifacts_root / "train.jsonl"
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+
+    with pytest.raises(typer.BadParameter, match="symbolic links or junctions"):
+        cli._secure_read_artifact(link, artifacts_root, "training dataset")
+
+
+def test_secure_read_artifact_rejects_hardlink(tmp_path: Path) -> None:
+    """Reject artifact files that are hardlinks."""
+    artifacts_root = tmp_path / "artifacts"
+    artifacts_root.mkdir()
+    outside = tmp_path / "outside.jsonl"
+    outside.write_bytes(b'{"sensitive": "data"}')
+
+    hardlink = artifacts_root / "train.jsonl"
+    try:
+        os.link(outside, hardlink)
+    except OSError as exc:
+        pytest.skip(f"hardlinks are unavailable: {exc}")
+
+    with pytest.raises(typer.BadParameter, match="multiple hard links"):
+        cli._secure_read_artifact(hardlink, artifacts_root, "training dataset")
+
+
+def test_secure_read_artifact_rejects_path_outside_root(tmp_path: Path) -> None:
+    """Reject artifact files outside the allowed root."""
+    artifacts_root = tmp_path / "artifacts"
+    artifacts_root.mkdir()
+    outside = tmp_path / "outside.jsonl"
+    outside.write_bytes(b'{"sensitive": "data"}')
+
+    with pytest.raises(typer.BadParameter, match="must stay within"):
+        cli._secure_read_artifact(outside, artifacts_root, "training dataset")
+
+
+def test_secure_read_artifact_accepts_valid_file(tmp_path: Path) -> None:
+    """Accept a valid artifact file within the allowed root."""
+    artifacts_root = tmp_path / "artifacts"
+    artifacts_root.mkdir()
+    valid_file = artifacts_root / "train.jsonl"
+    valid_file.write_bytes(b'{"valid": "data"}')
+
+    content = cli._secure_read_artifact(valid_file, artifacts_root, "training dataset")
+    assert content == b'{"valid": "data"}'

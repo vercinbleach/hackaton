@@ -110,6 +110,7 @@ class PioneerClient:
         *,
         dataset_name: str,
         purpose: str,
+        content: bytes | None = None,
     ) -> UploadedDataset:
         try:
             reservation = UploadReservation.model_validate(
@@ -137,12 +138,17 @@ class PioneerClient:
         if not parsed.hostname:
             raise PioneerError("presigned URL must have a valid hostname")
 
+        # Use pre-validated content if provided (from secure pipeline),
+        # otherwise read the file (for standalone upload command)
+        if content is None:
+            content = path.read_bytes()
+
         content_type = mimetypes.guess_type(path.name)[0] or "application/x-ndjson"
         try:
             # Use dedicated credential-free client for presigned URL upload
             response = self._upload_client.put(
                 reservation.presigned_url,
-                content=path.read_bytes(),
+                content=content,
                 headers={"Content-Type": content_type},
             )
             response.raise_for_status()
