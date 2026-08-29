@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cala_fastpath_training.catalog import load_catalog
 from cala_fastpath_training.compiler import compile_plan
-from cala_fastpath_training.dataset import grouped_split, to_pioneer_row, validate_examples
+from cala_fastpath_training.dataset import (
+    grouped_split,
+    to_pioneer_row,
+    validate_examples,
+    write_jsonl,
+)
 from cala_fastpath_training.models import Plan
 from cala_fastpath_training.seed_data import bootstrap_examples
 
@@ -54,3 +61,38 @@ def test_compile_plan_orders_modifiers() -> None:
     assert compile_plan(plan, CATALOG) == (
         "startups.location=Spain.funding>10M.order_by=funding DESC.limit=5.return(name, funding)"
     )
+
+
+def test_write_jsonl_rejects_symlink_destination(tmp_path: Path) -> None:
+    """Test that write_jsonl refuses to write to a symlink destination."""
+    target = tmp_path / "target.jsonl"
+    target.write_text("original content", encoding="utf-8")
+
+    symlink = tmp_path / "symlink.jsonl"
+    try:
+        symlink.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+
+    examples = bootstrap_examples()[:1]  # Use just one example for the test
+
+    with pytest.raises(ValueError, match="Refusing to write to symlink"):
+        write_jsonl(symlink, examples)
+
+    # Verify the target file was not modified
+    assert target.read_text(encoding="utf-8") == "original content"
+
+
+def test_write_jsonl_works_with_regular_file(tmp_path: Path) -> None:
+    """Test that write_jsonl works correctly with regular files."""
+    output = tmp_path / "output.jsonl"
+    examples = bootstrap_examples()[:2]  # Use just two examples for the test
+
+    write_jsonl(output, examples)
+
+    assert output.exists()
+    assert not output.is_symlink()
+
+    # Verify the content is valid JSONL
+    lines = output.read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 2

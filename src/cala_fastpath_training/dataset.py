@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
+import tempfile
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -31,12 +33,50 @@ def read_jsonl(path: Path) -> list[TrainingExample]:
 
 
 def write_jsonl(path: Path, rows: Iterable[TrainingExample | PioneerRow]) -> None:
+    """Write training examples or pioneer rows to a JSONL file securely.
+
+    This function protects against symlink attacks by:
+    1. Checking if the destination path is a symlink
+    2. Writing to a temporary file first
+    3. Atomically replacing the destination with os.replace()
+
+    Args:
+        path: Destination file path
+        rows: Iterable of training examples or pioneer rows to write
+
+    Raises:
+        ValueError: If the destination path is a symlink
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
+
+    # Check if the destination is a symlink before writing
+    if path.exists() and path.is_symlink():
+        raise ValueError(f"Refusing to write to symlink: {path}")
+
+    # Write to a temporary file in the same directory to ensure atomic replacement
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        newline="\n",
+        dir=path.parent,
+        delete=False,
+    ) as handle:
+        temporary = Path(handle.name)
         for row in rows:
             payload = row.model_dump(by_alias=True, exclude_none=True)
             handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
             handle.write("\n")
+
+    try:
+        # Verify the destination is still not a symlink (TOCTOU mitigation)
+        if path.exists() and path.is_symlink():
+            raise ValueError(f"Refusing to write to symlink: {path}")
+        # Atomically replace the destination file
+        os.replace(temporary, path)
+    except Exception:
+        # Clean up temporary file on error
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def validate_examples(rows: list[TrainingExample], catalog: Catalog) -> None:
