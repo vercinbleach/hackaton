@@ -170,25 +170,35 @@ class PioneerClient:
             version_number=reservation.version_number,
         )
 
-    def get_dataset(self, name: str) -> JsonObject:
-        return self._request("GET", f"/felix/datasets/{quote(name, safe='')}")
+    def get_dataset(self, name: str, version_number: str | None = None) -> JsonObject:
+        path = f"/felix/datasets/{quote(name, safe='')}"
+        if version_number is not None:
+            path += f"/{quote(version_number, safe='')}"
+        return self._request("GET", path)
 
-    def wait_for_dataset(self, name: str, *, interval: int = 5, timeout: int = 600) -> JsonObject:
+    def wait_for_dataset(
+        self, dataset: UploadedDataset, *, interval: int = 5, timeout: int = 600
+    ) -> JsonObject:
         deadline = time.monotonic() + timeout
         while True:
-            result = self.get_dataset(name)
-            versions = result.get("versions", [])
-            latest = versions[0] if versions else result
-            if not isinstance(latest, dict):
-                raise PioneerError(f"dataset {name!r} returned an invalid version")
-            status = latest.get("status")
+            result = self.get_dataset(dataset.dataset_name, dataset.version_number)
+            if result.get("id") != dataset.dataset_id:
+                raise PioneerError(f"dataset {dataset.dataset_name!r} returned an unexpected ID")
+            if result.get("version_number") != dataset.version_number:
+                raise PioneerError(
+                    f"dataset {dataset.dataset_name!r} returned an unexpected version"
+                )
+            status = result.get("status")
             if status == "ready":
-                return latest
+                return result
             if status == "failed":
-                raise PioneerError(f"dataset {name!r} failed: {latest.get('processing_error')}")
+                raise PioneerError(
+                    f"dataset {dataset.dataset_name!r} failed: {result.get('processing_error')}"
+                )
             if time.monotonic() >= deadline:
                 raise PioneerError(
-                    f"timed out waiting for dataset {name!r}; last status: {status!r}"
+                    f"timed out waiting for dataset {dataset.dataset_name!r}; "
+                    f"last status: {status!r}"
                 )
             time.sleep(interval)
 

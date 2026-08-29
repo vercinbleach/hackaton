@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from cala_fastpath_training.cala import CalaClient
+from cala_fastpath_training.models import UploadedDataset
 from cala_fastpath_training.pioneer import PioneerClient, PioneerError
 
 
@@ -196,3 +197,41 @@ def test_pioneer_client_strips_trailing_slash_from_base_url() -> None:
 def test_pioneer_client_rejects_ambiguous_base_urls(base_url: str, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         PioneerClient(api_key="test-key", base_url=base_url)
+
+
+def test_wait_for_dataset_polls_the_uploaded_version() -> None:
+    uploaded = UploadedDataset(
+        dataset_id="dataset-1", dataset_name="fastpath-train", version_number="7"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/felix/datasets/fastpath-train/7"
+        return httpx.Response(
+            200,
+            json={"id": "dataset-1", "version_number": "7", "status": "ready"},
+        )
+
+    with PioneerClient(api_key="test-key", transport=httpx.MockTransport(handler)) as client:
+        assert client.wait_for_dataset(uploaded, interval=0, timeout=1)["status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    "response, message",
+    [
+        ({"id": "other", "version_number": "7", "status": "ready"}, "unexpected ID"),
+        ({"id": "dataset-1", "version_number": "8", "status": "ready"}, "unexpected version"),
+    ],
+)
+def test_wait_for_dataset_rejects_identity_mismatch(response: dict[str, str], message: str) -> None:
+    uploaded = UploadedDataset(
+        dataset_id="dataset-1", dataset_name="fastpath-train", version_number="7"
+    )
+
+    with (
+        PioneerClient(
+            api_key="test-key",
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)),
+        ) as client,
+        pytest.raises(PioneerError, match=message),
+    ):
+        client.wait_for_dataset(uploaded, interval=0, timeout=1)

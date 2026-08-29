@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import stat
 import sys
 import tempfile
@@ -365,7 +366,7 @@ def upload(
         uploaded = client.upload_dataset(input_path, dataset_name=name, purpose=purpose)
         result = uploaded.model_dump()
         if wait:
-            result["ready"] = client.wait_for_dataset(uploaded.dataset_name)
+            result["ready"] = client.wait_for_dataset(uploaded)
     _json(result)
 
 
@@ -447,22 +448,23 @@ def pipeline(
     )
 
     with PioneerClient.from_environment() as client:
-        train_name = f"{prefix}-train"
-        evaluation_name = f"{prefix}-evaluation"
+        run_id = secrets.token_hex(12)
+        train_name = f"{prefix}-{run_id}-train"
+        evaluation_name = f"{prefix}-{run_id}-evaluation"
         train_dataset = client.upload_dataset(
             train_path,
             dataset_name=train_name,
             purpose="training",
             content=train_content,
         )
-        client.wait_for_dataset(train_dataset.dataset_name)
+        client.wait_for_dataset(train_dataset)
         evaluation_dataset = client.upload_dataset(
             validation_path,
             dataset_name=evaluation_name,
             purpose="evaluation",
             content=validation_content,
         )
-        client.wait_for_dataset(evaluation_dataset.dataset_name)
+        client.wait_for_dataset(evaluation_dataset)
 
         training = client.start_training(
             model_name=model_name,

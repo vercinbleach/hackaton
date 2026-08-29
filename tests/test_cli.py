@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
 from cala_fastpath_training import cli
+from cala_fastpath_training.models import UploadedDataset
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "training" / "config" / "catalog.json"
@@ -329,3 +331,57 @@ def test_secure_read_artifact_accepts_valid_file(tmp_path: Path) -> None:
 
     content = cli._secure_read_artifact(valid_file, artifacts_root, "training dataset")
     assert content == b'{"valid": "data"}'
+
+
+def test_pipeline_uses_unique_dataset_names(tmp_path: Path, monkeypatch) -> None:
+    project = _project_root(tmp_path, monkeypatch)
+    artifacts = project / "training" / "artifacts" / "v0" / "pioneer"
+    artifacts.mkdir(parents=True)
+    (artifacts / "train.jsonl").write_text("{}\n", encoding="utf-8")
+    (artifacts / "validation.jsonl").write_text("{}\n", encoding="utf-8")
+    uploaded_names: list[str] = []
+
+    class FakePioneer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def upload_dataset(self, path, *, dataset_name, purpose, content=None):
+            uploaded_names.append(dataset_name)
+            return UploadedDataset(
+                dataset_id=f"id-{purpose}",
+                dataset_name=dataset_name,
+                version_number="1",
+            )
+
+        def wait_for_dataset(self, dataset):
+            return {"status": "ready"}
+
+        def start_training(self, **kwargs):
+            return {"id": "training-1"}
+
+        def wait_for_training(self, job_id):
+            return {"id": "model-1", "status": "complete"}
+
+        def start_evaluation(self, **kwargs):
+            return SimpleNamespace(evaluations=[SimpleNamespace(id="evaluation-1")])
+
+        def wait_for_evaluation(self, evaluation_id):
+            return {"status": "complete"}
+
+    fake = FakePioneer()
+    monkeypatch.setattr(cli.secrets, "token_hex", lambda size: "unique-run")
+    monkeypatch.setattr(cli.PioneerClient, "from_environment", lambda: fake)
+
+    result = RUNNER.invoke(
+        cli.app,
+        ["pipeline", "--artifacts-dir", str(project / "training" / "artifacts" / "v0")],
+    )
+
+    assert result.exit_code == 0
+    assert uploaded_names == [
+        "cala-fastpath-v0-unique-run-train",
+        "cala-fastpath-v0-unique-run-evaluation",
+    ]
