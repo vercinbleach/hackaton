@@ -331,6 +331,8 @@ def test_secure_read_artifact_accepts_valid_file(tmp_path: Path) -> None:
 
     content = cli._secure_read_artifact(valid_file, artifacts_root, "training dataset")
     assert content == b'{"valid": "data"}'
+
+
 def test_pipeline_uses_unique_dataset_names(tmp_path: Path, monkeypatch) -> None:
     project = _project_root(tmp_path, monkeypatch)
     artifacts = project / "training" / "artifacts" / "v0" / "pioneer"
